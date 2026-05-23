@@ -1,0 +1,38 @@
+---
+description: Dark theme visibility rules for UI and Clerk components
+globs: **/*.{tsx,ts,css}
+alwaysApply: true
+---
+
+# Dark theme visibility
+
+This app uses a **dark-first** design system. All UI must remain readable on `#0c0c10` / `#16161c` backgrounds.
+
+## Color tokens (use these, not raw black)
+
+| Purpose | Token / class |
+|---------|----------------|
+| Primary text | `text-foreground` / `#f4f4f5` |
+| Secondary text | `text-muted` / `#a1a1aa` |
+| Surfaces | `bg-surface` / `#16161c` |
+| Borders | `border-border` / `#2a2a34` |
+| Accent / links | `text-accent` / `#8b7cf7` |
+| OAuth buttons | White bg + `#18181b` text |
+
+## Rules
+
+1. **Never use** `text-black`, `#000`, or dark grays (`#333`, `#666`) on dark backgrounds.
+2. **Clerk components** — update both:
+   - `lib/clerk/appearance.ts` (element keys)
+   - `app/globals.css` under "Clerk dark UI" (CSS overrides for portaled UI)
+3. **Portaled UI** (UserButton menu, modals) renders outside page layout — style with `html.dark .cl-*` selectors, not scoped wrappers alone.
+4. **New pages** — use design system utilities: `text-foreground`, `text-muted`, `bg-surface`, `card`.
+5. **Third-party embeds** — add explicit light text or contrasting surface; test at `/sign-in`, `/sign-up`, and signed-in UserButton menu.
+
+## Checklist before shipping UI
+
+- [ ] Headings and body text visible on dark bg
+- [ ] Form labels and placeholders readable
+- [ ] Buttons have sufficient contrast
+- [ ] Clerk auth + UserButton popover tested while signed in
+- [ ] Links use `text-accent`, not default blue-on-black
