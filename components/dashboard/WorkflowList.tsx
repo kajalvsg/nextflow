@@ -1,45 +1,31 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Card } from "@/components/ui/Card";
 import type { WorkflowSummaryDTO } from "@/types/workflow";
-import { EditWorkflowDialog } from "./EditWorkflowDialog";
 import { WorkflowCard } from "./WorkflowCard";
 
 type WorkflowListProps = {
   workflows: WorkflowSummaryDTO[];
+  onEdit: (workflow: WorkflowSummaryDTO) => void;
+  onDelete: (id: string) => void;
+  onDeleteFailed: (workflow: WorkflowSummaryDTO) => void;
 };
 
-export function WorkflowList({ workflows }: WorkflowListProps) {
-  const [hiddenIds, setHiddenIds] = useState<Record<string, true>>({});
-  const [editingWorkflow, setEditingWorkflow] =
-    useState<WorkflowSummaryDTO | null>(null);
-
-  const visibleWorkflows = useMemo(
-    () => workflows.filter((workflow) => !hiddenIds[workflow.id]),
-    [workflows, hiddenIds],
-  );
-
+export function WorkflowList({
+  workflows,
+  onEdit,
+  onDelete,
+  onDeleteFailed,
+}: WorkflowListProps) {
   const sortedWorkflows = useMemo(
     () =>
-      [...visibleWorkflows].sort(
+      [...workflows].sort(
         (a, b) =>
           new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
       ),
-    [visibleWorkflows],
+    [workflows],
   );
-
-  function handleDelete(id: string) {
-    setHiddenIds((current) => ({ ...current, [id]: true }));
-  }
-
-  function handleDeleteFailed(id: string) {
-    setHiddenIds((current) => {
-      const next = { ...current };
-      delete next[id];
-      return next;
-    });
-  }
 
   if (sortedWorkflows.length === 0) {
     return (
@@ -55,26 +41,16 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
   }
 
   return (
-    <>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {sortedWorkflows.map((workflow) => (
-          <WorkflowCard
-            key={workflow.id}
-            workflow={workflow}
-            onEdit={setEditingWorkflow}
-            onDelete={handleDelete}
-            onDeleteFailed={handleDeleteFailed}
-          />
-        ))}
-      </div>
-
-      <EditWorkflowDialog
-        workflow={editingWorkflow}
-        open={editingWorkflow !== null}
-        onOpenChange={(open) => {
-          if (!open) setEditingWorkflow(null);
-        }}
-      />
-    </>
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {sortedWorkflows.map((workflow) => (
+        <WorkflowCard
+          key={workflow.id}
+          workflow={workflow}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onDeleteFailed={onDeleteFailed}
+        />
+      ))}
+    </div>
   );
 }

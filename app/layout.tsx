@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
+import { ui } from "@clerk/ui";
 import { Inter, Geist_Mono } from "next/font/google";
 import { ConditionalAuthHeader } from "@/components/layout/ConditionalAuthHeader";
 import { AppShell } from "@/components/layout";
 import { siteConfig } from "@/config/site";
 import { clerkAppearance } from "@/lib/clerk/appearance";
+import { CLERK_AUTH_PATHS } from "@/lib/clerk/config";
 import "./globals.css";
 
 const inter = Inter({
@@ -38,7 +40,14 @@ export default function RootLayout({
       className={`${inter.variable} ${geistMono.variable} h-full antialiased dark`}
     >
       <body className="min-h-full font-sans">
-        <ClerkProvider appearance={clerkAppearance}>
+        <ClerkProvider
+          appearance={clerkAppearance}
+          ui={ui}
+          signInUrl={CLERK_AUTH_PATHS.signIn}
+          signUpUrl={CLERK_AUTH_PATHS.signUp}
+          signInFallbackRedirectUrl={CLERK_AUTH_PATHS.afterAuth}
+          signUpFallbackRedirectUrl={CLERK_AUTH_PATHS.afterAuth}
+        >
           <AppShell>
             <ConditionalAuthHeader />
             {children}

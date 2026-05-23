@@ -1,23 +1,25 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { createWorkflow } from "@/actions/workflows";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
+import type { WorkflowSummaryDTO } from "@/types/workflow";
 
 type CreateWorkflowDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSuccess: (workflow: WorkflowSummaryDTO) => void;
 };
 
 export function CreateWorkflowDialog({
   open,
   onOpenChange,
+  onSuccess,
 }: CreateWorkflowDialogProps) {
-  const router = useRouter();
+  const formRef = useRef<HTMLFormElement>(null);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -46,9 +48,10 @@ export function CreateWorkflowDialog({
         return;
       }
 
+      onSuccess(result.data);
+      formRef.current?.reset();
+      setError(null);
       onOpenChange(false);
-      event.currentTarget.reset();
-      router.refresh();
     });
   }
 
@@ -59,7 +62,7 @@ export function CreateWorkflowDialog({
       title="Create workflow"
       description="Give your workflow a name and optional description."
     >
-      <form onSubmit={handleSubmit} className="stack-lg">
+      <form ref={formRef} onSubmit={handleSubmit} className="stack-lg">
         <Input
           name="name"
           label="Workflow name"

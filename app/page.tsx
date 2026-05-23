@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { Show, SignInButton, SignUpButton } from "@clerk/nextjs";
+import { Show } from "@clerk/nextjs";
 import { Container, PageSection } from "@/components/layout";
 import { Card } from "@/components/ui";
+import { CLERK_AUTH_PATHS } from "@/lib/clerk/config";
 
 export default function Home() {
   return (
@@ -25,26 +26,22 @@ export default function Home() {
               </p>
               <div className="flex flex-wrap gap-3 pt-2">
                 <Show when="signed-out">
-                  <SignInButton mode="redirect" forceRedirectUrl="/dashboard">
-                    <button
-                      type="button"
-                      className="rounded-button border border-border bg-surface px-4 py-2 text-body-sm font-medium text-foreground transition-colors hover:bg-surface-hover"
-                    >
-                      Sign in
-                    </button>
-                  </SignInButton>
-                  <SignUpButton mode="redirect" forceRedirectUrl="/dashboard">
-                    <button
-                      type="button"
-                      className="rounded-button bg-accent px-4 py-2 text-body-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover"
-                    >
-                      Sign up
-                    </button>
-                  </SignUpButton>
+                  <Link
+                    href={CLERK_AUTH_PATHS.signIn}
+                    className="rounded-button border border-border bg-surface px-4 py-2 text-body-sm font-medium text-foreground transition-colors hover:bg-surface-hover"
+                  >
+                    Sign in
+                  </Link>
+                  <Link
+                    href={CLERK_AUTH_PATHS.signUp}
+                    className="rounded-button bg-accent px-4 py-2 text-body-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover"
+                  >
+                    Sign up
+                  </Link>
                 </Show>
                 <Show when="signed-in">
                   <Link
-                    href="/dashboard"
+                    href={CLERK_AUTH_PATHS.afterAuth}
                     className="rounded-button bg-accent px-4 py-2 text-body-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover"
                   >
                     Go to dashboard

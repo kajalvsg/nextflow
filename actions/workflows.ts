@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import type { ActionResult, WorkflowSummary } from "@/types/workflow";
+import { toWorkflowDTO, type WorkflowSummaryDTO } from "@/types/workflow";
 
 const createWorkflowSchema = z.object({
   name: z
@@ -86,7 +87,7 @@ export async function getWorkflows(): Promise<WorkflowSummary[]> {
 
 export async function createWorkflow(
   input: z.infer<typeof createWorkflowSchema>,
-): Promise<ActionResult<WorkflowSummary>> {
+): Promise<ActionResult<WorkflowSummaryDTO>> {
   try {
     const userId = await requireUserId();
     const parsed = createWorkflowSchema.safeParse(input);
@@ -120,7 +121,7 @@ export async function createWorkflow(
 
     revalidatePath("/dashboard");
 
-    return { success: true, data: serializeWorkflow(workflow) };
+    return { success: true, data: toWorkflowDTO(serializeWorkflow(workflow)) };
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to create workflow";
@@ -130,7 +131,7 @@ export async function createWorkflow(
 
 export async function updateWorkflow(
   input: z.infer<typeof updateWorkflowSchema>,
-): Promise<ActionResult<WorkflowSummary>> {
+): Promise<ActionResult<WorkflowSummaryDTO>> {
   try {
     const userId = await requireUserId();
     const parsed = updateWorkflowSchema.safeParse(input);
@@ -171,7 +172,7 @@ export async function updateWorkflow(
 
     revalidatePath("/dashboard");
 
-    return { success: true, data: serializeWorkflow(workflow) };
+    return { success: true, data: toWorkflowDTO(serializeWorkflow(workflow)) };
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to update workflow";

@@ -24,7 +24,7 @@ export const clerkAppearance = {
   },
   elements: {
     /* ── Shared ── */
-    rootBox: "text-foreground",
+    rootBox: "mx-auto w-full text-foreground",
     cardBox: "shadow-card",
     card: "bg-surface border border-border rounded-xl text-foreground",
     logoBox: "hidden",

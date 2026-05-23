@@ -3,20 +3,20 @@
 import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { Plus } from "lucide-react";
-import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { siteConfig } from "@/config/site";
 import { clerkAppearance } from "@/lib/clerk/appearance";
 import { Container } from "@/components/layout";
-import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
 
 type DashboardNavbarProps = {
   userName?: string | null;
+  onCreateClick: () => void;
 };
 
-export function DashboardNavbar({ userName }: DashboardNavbarProps) {
-  const [createOpen, setCreateOpen] = useState(false);
-
+export function DashboardNavbar({
+  userName,
+  onCreateClick,
+}: DashboardNavbarProps) {
   return (
     <>
       <header className="border-b border-border-soft bg-surface/80 backdrop-blur-sm">
@@ -39,7 +39,7 @@ export function DashboardNavbar({ userName }: DashboardNavbarProps) {
               <Button
                 size="sm"
                 className="whitespace-nowrap"
-                onClick={() => setCreateOpen(true)}
+                onClick={onCreateClick}
               >
                 <Plus className="h-4 w-4" />
                 Create Workflow
@@ -63,8 +63,6 @@ export function DashboardNavbar({ userName }: DashboardNavbarProps) {
           </div>
         </Container>
       ) : null}
-
-      <CreateWorkflowDialog open={createOpen} onOpenChange={setCreateOpen} />
     </>
   );
 }

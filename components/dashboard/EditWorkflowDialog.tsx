@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { updateWorkflow } from "@/actions/workflows";
 import { Button } from "@/components/ui/Button";
@@ -13,14 +12,15 @@ type EditWorkflowDialogProps = {
   workflow: WorkflowSummaryDTO | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSuccess: (workflow: WorkflowSummaryDTO) => void;
 };
 
 export function EditWorkflowDialog({
   workflow,
   open,
   onOpenChange,
+  onSuccess,
 }: EditWorkflowDialogProps) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -52,8 +52,9 @@ export function EditWorkflowDialog({
         return;
       }
 
+      onSuccess(result.data);
+      setError(null);
       onOpenChange(false);
-      router.refresh();
     });
   }
 

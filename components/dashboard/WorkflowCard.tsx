@@ -1,7 +1,6 @@
 "use client";
 
 import { Pencil, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { deleteWorkflow } from "@/actions/workflows";
 import { Badge, statusToBadgeVariant } from "@/components/ui/Badge";
@@ -14,7 +13,7 @@ type WorkflowCardProps = {
   workflow: WorkflowSummaryDTO;
   onEdit: (workflow: WorkflowSummaryDTO) => void;
   onDelete: (id: string) => void;
-  onDeleteFailed: (id: string) => void;
+  onDeleteFailed: (workflow: WorkflowSummaryDTO) => void;
 };
 
 export function WorkflowCard({
@@ -23,7 +22,6 @@ export function WorkflowCard({
   onDelete,
   onDeleteFailed,
 }: WorkflowCardProps) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,14 +35,13 @@ export function WorkflowCard({
       const result = await deleteWorkflow({ id: workflow.id });
 
       if (!result.success) {
+        onDeleteFailed(workflow);
         setError(result.error);
-        onDeleteFailed(workflow.id);
-        router.refresh();
+        setShowConfirm(false);
         return;
       }
 
       setShowConfirm(false);
-      router.refresh();
     });
   }
 
