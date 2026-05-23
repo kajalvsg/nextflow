@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Inter, Geist_Mono } from "next/font/google";
-import { AuthHeader } from "@/components/auth";
+import { ConditionalAuthHeader } from "@/components/layout/ConditionalAuthHeader";
 import { AppShell } from "@/components/layout";
 import { siteConfig } from "@/config/site";
 import { clerkAppearance } from "@/lib/clerk/appearance";
@@ -40,7 +40,7 @@ export default function RootLayout({
       <body className="min-h-full font-sans">
         <ClerkProvider appearance={clerkAppearance}>
           <AppShell>
-            <AuthHeader />
+            <ConditionalAuthHeader />
             {children}
           </AppShell>
         </ClerkProvider>

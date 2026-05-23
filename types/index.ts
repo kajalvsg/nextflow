@@ -5,3 +5,11 @@ export type WithClassName = {
 export type WithChildren = {
   children: React.ReactNode;
 };
+
+export type {
+  ActionResult,
+  WorkflowStatus,
+  WorkflowSummary,
+  WorkflowSummaryDTO,
+} from "./workflow";
+export { toWorkflowDTO } from "./workflow";

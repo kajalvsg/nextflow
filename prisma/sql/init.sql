@@ -4,6 +4,7 @@
 CREATE TABLE IF NOT EXISTS "Workflow" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "description" TEXT,
     "userId" TEXT NOT NULL,
     "nodes" JSONB NOT NULL,
     "edges" JSONB NOT NULL,
@@ -14,6 +15,8 @@ CREATE TABLE IF NOT EXISTS "Workflow" (
 );
 
 CREATE INDEX IF NOT EXISTS "Workflow_userId_idx" ON "Workflow"("userId");
+
+ALTER TABLE "Workflow" ADD COLUMN IF NOT EXISTS "description" TEXT;
 
 CREATE TABLE IF NOT EXISTS "WorkflowRun" (
     "id" TEXT NOT NULL,

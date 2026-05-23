@@ -7,9 +7,10 @@ datasource db {
 }
 
 model Workflow {
-  id        String        @id @default(cuid())
-  name      String
-  userId    String
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  userId      String
   nodes     Json
   edges     Json
   status    String        @default("idle")
