@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { cn } from "@/lib/utils/cn";
 import type { WithChildren, WithClassName } from "@/types";
 
@@ -10,6 +11,7 @@ type ButtonProps = WithChildren &
     size?: ButtonSize;
     type?: "button" | "submit" | "reset";
     disabled?: boolean;
+    href?: string;
     onClick?: () => void;
   };
 
@@ -37,19 +39,30 @@ export function Button({
   size = "md",
   type = "button",
   disabled,
+  href,
   onClick,
 }: ButtonProps) {
+  const classes = cn(
+    "inline-flex items-center justify-center gap-2 rounded-button font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed",
+    variantClasses[variant],
+    sizeClasses[size],
+    className,
+  );
+
+  if (href && !disabled) {
+    return (
+      <Link href={href} className={classes} prefetch>
+        {children}
+      </Link>
+    );
+  }
+
   return (
     <button
       type={type}
       disabled={disabled}
       onClick={onClick}
-      className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-button font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed",
-        variantClasses[variant],
-        sizeClasses[size],
-        className,
-      )}
+      className={classes}
     >
       {children}
     </button>

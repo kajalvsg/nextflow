@@ -489,3 +489,42 @@ html.dark .cl-userButtonPopoverFooter svg {
 .clerk-auth [data-localization-key="footerPageLink__terms"] {
   color: #71717a !important;
 }
+
+/* ─── React Flow workflow builder ───────────────────────────────────────────── */
+
+.workflow-canvas .react-flow__pane {
+  cursor: grab;
+}
+
+.workflow-canvas .react-flow__pane:active {
+  cursor: grabbing;
+}
+
+.workflow-canvas .react-flow__edge-path {
+  stroke: #8b7cf7;
+  stroke-width: 2;
+}
+
+.workflow-controls {
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-card) !important;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+
+.workflow-controls button {
+  background: var(--surface-muted) !important;
+  border-bottom: 1px solid var(--border-soft) !important;
+  fill: var(--muted) !important;
+}
+
+.workflow-controls button:hover {
+  background: var(--surface-hover) !important;
+}
+
+.workflow-minimap {
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-card) !important;
+  background: var(--surface) !important;
+  box-shadow: var(--shadow-card);
+}

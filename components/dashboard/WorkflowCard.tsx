@@ -1,12 +1,14 @@
 "use client";
 
-import { Pencil, Trash2 } from "lucide-react";
+import { ArrowRight, Pencil, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { deleteWorkflow } from "@/actions/workflows";
 import { Badge, statusToBadgeVariant } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { formatWorkflowDate } from "@/lib/utils/format";
+import { workflowRoute } from "@/lib/routes";
 import type { WorkflowSummaryDTO } from "@/types/workflow";
 
 type WorkflowCardProps = {
@@ -25,6 +27,7 @@ export function WorkflowCard({
   const [isPending, startTransition] = useTransition();
   const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const workflowHref = workflowRoute(workflow.id);
 
   function handleDelete() {
     setError(null);
@@ -50,9 +53,12 @@ export function WorkflowCard({
       <div className="stack flex-1">
         <div className="flex items-start justify-between gap-3">
           <div className="stack-sm min-w-0 flex-1">
-            <h3 className="truncate text-heading-sm text-foreground">
+            <Link
+              href={workflowHref}
+              className="block truncate text-heading-sm text-foreground transition-colors hover:text-accent"
+            >
               {workflow.name}
-            </h3>
+            </Link>
             {workflow.description ? (
               <p className="line-clamp-2 text-body-sm text-muted">
                 {workflow.description}
@@ -75,7 +81,7 @@ export function WorkflowCard({
         {error ? <p className="text-caption text-red-400">{error}</p> : null}
       </div>
 
-      <div className="divider mt-4 pt-4">
+      <div className="relative z-10 divider mt-4 pt-4">
         {showConfirm ? (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-body-sm text-muted">Delete this workflow?</span>
@@ -98,6 +104,10 @@ export function WorkflowCard({
           </div>
         ) : (
           <div className="flex items-center gap-2">
+            <Button size="sm" href={workflowHref} disabled={isPending}>
+              Open
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
             <Button
               size="sm"
               variant="secondary"
