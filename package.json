@@ -11,7 +11,8 @@
     "db:migrate": "prisma migrate dev",
     "db:push": "node scripts/push-schema.mjs",
     "db:push:prisma": "prisma db push",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "trigger:dev": "trigger dev --skip-mcp-install --skip-rules-install --env-file .env.local"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.4.1",
@@ -20,6 +21,7 @@
     "@google/generative-ai": "^0.24.1",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "@trigger.dev/sdk": "4.4.6",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
     "lucide-react": "^1.16.0",
@@ -44,6 +46,7 @@
     "eslint-config-next": "16.2.6",
     "prettier": "^3.8.3",
     "tailwindcss": "^4",
+    "trigger.dev": "4.4.6",
     "typescript": "^5"
   }
 }

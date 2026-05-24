@@ -6,7 +6,6 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import {
   createDefaultGraph,
-  ensureDefaultEdge,
   isGraphEmpty,
   parseStoredGraph,
   sanitizeGraphForSave,
@@ -50,26 +49,17 @@ export async function getWorkflowForBuilder(
   }
 
   let { nodes, edges } = parseStoredGraph(workflow.nodes, workflow.edges);
-  let shouldPersist = false;
 
   if (isGraphEmpty(nodes, edges)) {
     const defaults = createDefaultGraph();
     nodes = defaults.nodes;
     edges = defaults.edges;
-    shouldPersist = true;
-  } else {
-    const ensured = ensureDefaultEdge(nodes, edges);
-    nodes = ensured.nodes;
-    edges = ensured.edges;
-    shouldPersist = ensured.changed;
-  }
 
-  if (shouldPersist) {
     await db.workflow.update({
       where: { id: workflow.id },
       data: {
-        nodes,
-        edges,
+        nodes: nodes as unknown as object,
+        edges: edges as unknown as object,
       },
     });
   }
@@ -116,8 +106,8 @@ export async function saveWorkflowGraph(
     await db.workflow.update({
       where: { id },
       data: {
-        nodes,
-        edges,
+        nodes: nodes as unknown as object,
+        edges: edges as unknown as object,
       },
     });
 

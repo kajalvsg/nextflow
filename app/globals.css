@@ -505,6 +505,15 @@ html.dark .cl-userButtonPopoverFooter svg {
   stroke-width: 2;
 }
 
+.workflow-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke: #a78bfa;
+  stroke-width: 3;
+}
+
+.workflow-canvas .react-flow__edge:hover .react-flow__edge-path {
+  stroke: #a78bfa;
+}
+
 .workflow-controls {
   border: 1px solid var(--border) !important;
   border-radius: var(--radius-card) !important;
@@ -527,4 +536,53 @@ html.dark .cl-userButtonPopoverFooter svg {
   border-radius: var(--radius-card) !important;
   background: var(--surface) !important;
   box-shadow: var(--shadow-card);
+}
+
+.workflow-handle-row {
+  width: auto;
+}
+
+.workflow-handle-dot {
+  width: 12px !important;
+  height: 12px !important;
+  flex-shrink: 0;
+  border: 2px solid var(--accent) !important;
+  background: var(--background) !important;
+}
+
+.workflow-handle-dot:hover {
+  background: var(--accent-soft) !important;
+}
+
+.workflow-canvas .react-flow__node {
+  overflow: visible;
+}
+
+.workflow-canvas .react-flow__node .rounded-card {
+  overflow: hidden;
+}
+
+@keyframes workflow-node-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 16px rgba(251, 191, 36, 0.25),
+      0 0 32px rgba(251, 191, 36, 0.12);
+  }
+
+  50% {
+    box-shadow:
+      0 0 28px rgba(251, 191, 36, 0.55),
+      0 0 48px rgba(251, 191, 36, 0.25);
+  }
+}
+
+.workflow-node-running {
+  animation: workflow-node-pulse 1.6s ease-in-out infinite;
+}
+
+.workflow-canvas .react-flow__edge.workflow-edge-running .react-flow__edge-path {
+  stroke: #fbbf24;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.6));
 }

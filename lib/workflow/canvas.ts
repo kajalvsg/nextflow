@@ -1,5 +1,14 @@
 import type { Edge, Node } from "reactflow";
+import {
+  defaultConfigForNodeType,
+  defaultImageFieldState,
+  defaultLabelForNodeType,
+} from "@/lib/workflow/node-defaults";
 import type {
+  CropImageConfig,
+  GeminiProConfig,
+  ImageFieldState,
+  RequestInputsConfig,
   WorkflowCanvasEdge,
   WorkflowCanvasNode,
   WorkflowNodeData,
@@ -16,7 +25,9 @@ export function createDefaultEdge(): WorkflowCanvasEdge {
   return {
     id: DEFAULT_EDGE_ID,
     source: REQUEST_INPUTS_NODE_ID,
+    sourceHandle: "text_field",
     target: RESPONSE_NODE_ID,
+    targetHandle: "result",
     type: "default",
     animated: true,
     style: { stroke: "#8b7cf7", strokeWidth: 2 },
@@ -32,8 +43,12 @@ export function createDefaultGraph(): {
       {
         id: REQUEST_INPUTS_NODE_ID,
         type: "requestInputs",
-        position: { x: 80, y: 220 },
-        data: { label: "Request Inputs", nodeType: "requestInputs" },
+        position: { x: 80, y: 180 },
+        data: {
+          label: "Request Inputs",
+          nodeType: "requestInputs",
+          config: defaultConfigForNodeType("requestInputs") as RequestInputsConfig,
+        },
         deletable: false,
         draggable: true,
         selectable: true,
@@ -41,8 +56,12 @@ export function createDefaultGraph(): {
       {
         id: RESPONSE_NODE_ID,
         type: "response",
-        position: { x: 560, y: 220 },
-        data: { label: "Response", nodeType: "response" },
+        position: { x: 720, y: 180 },
+        data: {
+          label: "Response",
+          nodeType: "response",
+          config: defaultConfigForNodeType("response"),
+        },
         deletable: false,
         draggable: true,
         selectable: true,
@@ -74,7 +93,6 @@ function hasDefaultConnection(edges: WorkflowCanvasEdge[]): boolean {
   );
 }
 
-/** Adds Request Inputs → Response edge when missing; leaves node positions unchanged. */
 export function ensureDefaultEdge(
   nodes: WorkflowCanvasNode[],
   edges: WorkflowCanvasEdge[],
@@ -99,11 +117,115 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseNodeType(value: unknown): WorkflowNodeType {
-  if (value === "requestInputs" || value === "response") {
+  if (
+    value === "requestInputs" ||
+    value === "cropImage" ||
+    value === "geminiPro" ||
+    value === "response"
+  ) {
     return value;
   }
 
   return "requestInputs";
+}
+
+function parseImageFieldState(value: unknown): ImageFieldState {
+  if (!isRecord(value)) {
+    return defaultImageFieldState();
+  }
+
+  const uploadStatus = value.uploadStatus;
+  const validStatus =
+    uploadStatus === "idle" ||
+    uploadStatus === "uploading" ||
+    uploadStatus === "done" ||
+    uploadStatus === "error";
+
+  return {
+    fileName: typeof value.fileName === "string" ? value.fileName : null,
+    fileUrl: typeof value.fileUrl === "string" ? value.fileUrl : null,
+    uploadStatus: validStatus ? uploadStatus : "idle",
+  };
+}
+
+function parseRequestInputsConfig(value: unknown): RequestInputsConfig {
+  const defaults = defaultConfigForNodeType("requestInputs") as RequestInputsConfig;
+  if (!isRecord(value)) return defaults;
+
+  return {
+    textField:
+      typeof value.textField === "string" ? value.textField : defaults.textField,
+    imageField: parseImageFieldState(value.imageField),
+  };
+}
+
+function parseCropImageConfig(value: unknown): CropImageConfig {
+  const defaults = defaultConfigForNodeType("cropImage") as CropImageConfig;
+  if (!isRecord(value)) return defaults;
+
+  return {
+    xPercent:
+      typeof value.xPercent === "number" ? value.xPercent : defaults.xPercent,
+    yPercent:
+      typeof value.yPercent === "number" ? value.yPercent : defaults.yPercent,
+    widthPercent:
+      typeof value.widthPercent === "number"
+        ? value.widthPercent
+        : defaults.widthPercent,
+    heightPercent:
+      typeof value.heightPercent === "number"
+        ? value.heightPercent
+        : defaults.heightPercent,
+  };
+}
+
+function parseGeminiProConfig(value: unknown): GeminiProConfig {
+  const defaults = defaultConfigForNodeType("geminiPro") as GeminiProConfig;
+  if (!isRecord(value)) return defaults;
+
+  return {
+    settingsOpen:
+      typeof value.settingsOpen === "boolean"
+        ? value.settingsOpen
+        : defaults.settingsOpen,
+    temperature:
+      typeof value.temperature === "number"
+        ? value.temperature
+        : defaults.temperature,
+    maxOutputTokens:
+      typeof value.maxOutputTokens === "number"
+        ? value.maxOutputTokens
+        : defaults.maxOutputTokens,
+  };
+}
+
+function parseNodeConfig(
+  nodeType: WorkflowNodeType,
+  value: unknown,
+): WorkflowNodeData["config"] {
+  switch (nodeType) {
+    case "requestInputs":
+      return parseRequestInputsConfig(value);
+    case "cropImage":
+      return parseCropImageConfig(value);
+    case "geminiPro":
+      return parseGeminiProConfig(value);
+    case "response":
+      return {};
+  }
+}
+
+function parseNodeData(nodeType: WorkflowNodeType, data: unknown): WorkflowNodeData {
+  const record = isRecord(data) ? data : {};
+
+  return {
+    label:
+      typeof record.label === "string"
+        ? record.label
+        : defaultLabelForNodeType(nodeType),
+    nodeType,
+    config: parseNodeConfig(nodeType, record.config),
+  };
 }
 
 function parseNode(node: unknown): WorkflowCanvasNode | null {
@@ -111,8 +233,8 @@ function parseNode(node: unknown): WorkflowCanvasNode | null {
     return null;
   }
 
-  const data = isRecord(node.data) ? node.data : {};
-  const nodeType = parseNodeType(data.nodeType ?? node.type);
+  const dataRecord = isRecord(node.data) ? node.data : {};
+  const nodeType = parseNodeType(dataRecord.nodeType ?? node.type);
   const position = isRecord(node.position) ? node.position : { x: 0, y: 0 };
 
   return {
@@ -122,15 +244,7 @@ function parseNode(node: unknown): WorkflowCanvasNode | null {
       x: typeof position.x === "number" ? position.x : 0,
       y: typeof position.y === "number" ? position.y : 0,
     },
-    data: {
-      label:
-        typeof data.label === "string"
-          ? data.label
-          : nodeType === "response"
-            ? "Response"
-            : "Request Inputs",
-      nodeType,
-    },
+    data: parseNodeData(nodeType, dataRecord),
     deletable: !PROTECTED_NODE_IDS.has(node.id),
     draggable: true,
     selectable: true,
@@ -157,7 +271,9 @@ function parseEdge(edge: unknown): WorkflowCanvasEdge | null {
       typeof edge.targetHandle === "string" ? edge.targetHandle : undefined,
     type: typeof edge.type === "string" ? edge.type : "default",
     animated: typeof edge.animated === "boolean" ? edge.animated : undefined,
-    style: isRecord(edge.style) ? (edge.style as WorkflowCanvasEdge["style"]) : undefined,
+    style: isRecord(edge.style)
+      ? (edge.style as WorkflowCanvasEdge["style"])
+      : undefined,
   };
 }
 
@@ -190,14 +306,15 @@ export function sanitizeGraphForSave(
   return {
     nodes: nodes.map((node) => ({
       id: node.id,
-      type: node.type ?? "requestInputs",
+      type: node.type ?? node.data.nodeType,
       position: {
         x: node.position.x,
         y: node.position.y,
       },
       data: {
-        label: node.data?.label ?? "Node",
-        nodeType: parseNodeType(node.data?.nodeType ?? node.type),
+        label: node.data?.label ?? defaultLabelForNodeType(node.data.nodeType),
+        nodeType: node.data.nodeType,
+        config: node.data.config,
       },
       deletable: !PROTECTED_NODE_IDS.has(node.id),
       draggable: true,

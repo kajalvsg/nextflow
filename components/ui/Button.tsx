@@ -13,6 +13,8 @@ type ButtonProps = WithChildren &
     disabled?: boolean;
     href?: string;
     onClick?: () => void;
+    onMouseDown?: (event: React.MouseEvent<HTMLButtonElement>) => void;
+    onPointerDown?: (event: React.PointerEvent<HTMLButtonElement>) => void;
   };
 
 const variantClasses: Record<ButtonVariant, string> = {
@@ -41,6 +43,8 @@ export function Button({
   disabled,
   href,
   onClick,
+  onMouseDown,
+  onPointerDown,
 }: ButtonProps) {
   const classes = cn(
     "inline-flex items-center justify-center gap-2 rounded-button font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed",
@@ -62,6 +66,8 @@ export function Button({
       type={type}
       disabled={disabled}
       onClick={onClick}
+      onMouseDown={onMouseDown}
+      onPointerDown={onPointerDown}
       className={classes}
     >
       {children}

@@ -1,17 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Loader2, Play } from "lucide-react";
+import { Button } from "@/components/ui/Button";
 import { CLERK_AUTH_PATHS } from "@/lib/clerk/config";
 
 type WorkflowBuilderTopBarProps = {
   workflowName: string;
   saveStatus: "idle" | "saving" | "saved" | "error";
+  isRunning: boolean;
+  runScopeLabel: string | null;
+  onRun: () => void;
 };
 
 export function WorkflowBuilderTopBar({
   workflowName,
   saveStatus,
+  isRunning,
+  runScopeLabel,
+  onRun,
 }: WorkflowBuilderTopBarProps) {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border-soft bg-surface/90 px-4 backdrop-blur-sm">
@@ -27,12 +34,38 @@ export function WorkflowBuilderTopBar({
         <h1 className="truncate text-heading-sm text-foreground">{workflowName}</h1>
       </div>
 
-      <p className="text-caption text-muted-foreground">
-        {saveStatus === "saving" && "Saving…"}
-        {saveStatus === "saved" && "Saved"}
-        {saveStatus === "error" && "Save failed"}
-        {saveStatus === "idle" && "Workflow builder"}
-      </p>
+      <div className="flex items-center gap-3">
+        {runScopeLabel ? (
+          <p className="hidden text-caption text-muted sm:block">{runScopeLabel}</p>
+        ) : null}
+
+        <Button
+          type="button"
+          size="sm"
+          disabled={isRunning}
+          onClick={onRun}
+          className="min-w-[88px]"
+        >
+          {isRunning ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Running
+            </>
+          ) : (
+            <>
+              <Play className="h-4 w-4" />
+              Run
+            </>
+          )}
+        </Button>
+
+        <p className="hidden text-caption text-muted-foreground md:block">
+          {saveStatus === "saving" && "Saving…"}
+          {saveStatus === "saved" && "Saved"}
+          {saveStatus === "error" && "Save failed"}
+          {saveStatus === "idle" && "Workflow builder"}
+        </p>
+      </div>
     </header>
   );
 }
