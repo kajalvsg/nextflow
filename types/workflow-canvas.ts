@@ -11,7 +11,8 @@ export type AddableWorkflowNodeType = "cropImage" | "geminiPro";
 export type ImageFieldState = {
   fileName: string | null;
   fileUrl: string | null;
-  uploadStatus: "idle" | "uploading" | "done" | "error";
+  mimeType: string | null;
+  size: number | null;
 };
 
 export type RequestInputsConfig = {

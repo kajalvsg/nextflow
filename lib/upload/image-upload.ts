@@ -1,37 +1,74 @@
 import { uploadWorkflowImageAction } from "@/actions/workflow-images";
+import { uploadImageViaTransloadit } from "@/lib/upload/transloadit-client";
 
 export type ImageUploadResult = {
   fileName: string;
   fileUrl: string;
+  mimeType?: string | null;
+  size?: number | null;
 };
 
 export type ImageUploadOptions = {
   onProgress?: (percent: number) => void;
 };
 
+export const ALLOWED_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
+
+export const ALLOWED_IMAGE_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "gif",
+]);
+
+export function validateWorkflowImageFile(file: File): string | null {
+  if (!ALLOWED_IMAGE_MIME_TYPES.has(file.type)) {
+    const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+
+    if (!ALLOWED_IMAGE_EXTENSIONS.has(extension)) {
+      return "Please upload a JPG, PNG, WebP, or GIF image.";
+    }
+  }
+
+  if (file.size > 8 * 1024 * 1024) {
+    return "Image must be 8MB or smaller.";
+  }
+
+  return null;
+}
+
+export function isTransloaditConfigured(): boolean {
+  return Boolean(process.env.NEXT_PUBLIC_TRANSLOADIT_AUTH_KEY);
+}
+
 /**
- * Upload a workflow image via server action.
- * Files are stored under /public/workflow-assets and referenced by HTTP URL
- * so workflow JSON stays small and Trigger.dev can fetch images server-side.
+ * Upload a workflow image via Transloadit when configured, otherwise local storage.
  */
 export async function uploadWorkflowImage(
   file: File,
   workflowId: string,
-  _options?: ImageUploadOptions,
+  options?: ImageUploadOptions,
 ): Promise<ImageUploadResult> {
-  void _options;
+  if (isTransloaditConfigured()) {
+    return uploadImageViaTransloadit(file, options);
+  }
 
   const formData = new FormData();
   formData.append("file", file);
 
-  return uploadWorkflowImageAction(workflowId, formData);
-}
+  const result = await uploadWorkflowImageAction(workflowId, formData);
 
-export function isTransloaditConfigured(): boolean {
-  return Boolean(
-    process.env.NEXT_PUBLIC_TRANSLOADIT_KEY &&
-      process.env.NEXT_PUBLIC_TRANSLOADIT_TEMPLATE_ID,
-  );
+  return {
+    ...result,
+    mimeType: file.type || null,
+    size: file.size,
+  };
 }
 
 export function getExecutableImageUrl(

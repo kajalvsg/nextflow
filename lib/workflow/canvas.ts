@@ -3,6 +3,7 @@ import {
   defaultConfigForNodeType,
   defaultImageFieldState,
   defaultLabelForNodeType,
+  serializeImageFieldState,
 } from "@/lib/workflow/node-defaults";
 import type {
   CropImageConfig,
@@ -134,18 +135,7 @@ function parseImageFieldState(value: unknown): ImageFieldState {
     return defaultImageFieldState();
   }
 
-  const uploadStatus = value.uploadStatus;
-  const validStatus =
-    uploadStatus === "idle" ||
-    uploadStatus === "uploading" ||
-    uploadStatus === "done" ||
-    uploadStatus === "error";
-
-  return {
-    fileName: typeof value.fileName === "string" ? value.fileName : null,
-    fileUrl: typeof value.fileUrl === "string" ? value.fileUrl : null,
-    uploadStatus: validStatus ? uploadStatus : "idle",
-  };
+  return serializeImageFieldState(value);
 }
 
 function parseRequestInputsConfig(value: unknown): RequestInputsConfig {
@@ -314,7 +304,15 @@ export function sanitizeGraphForSave(
       data: {
         label: node.data?.label ?? defaultLabelForNodeType(node.data.nodeType),
         nodeType: node.data.nodeType,
-        config: node.data.config,
+        config:
+          node.data.nodeType === "requestInputs"
+            ? {
+                textField: (node.data.config as RequestInputsConfig).textField,
+                imageField: serializeImageFieldState(
+                  (node.data.config as RequestInputsConfig).imageField,
+                ),
+              }
+            : node.data.config,
       },
       deletable: !PROTECTED_NODE_IDS.has(node.id),
       draggable: true,

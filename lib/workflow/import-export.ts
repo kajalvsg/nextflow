@@ -5,7 +5,7 @@ import {
   parseStoredGraph,
   sanitizeGraphForSave,
 } from "@/lib/workflow/canvas";
-import { defaultConfigForNodeType } from "@/lib/workflow/node-defaults";
+import { defaultConfigForNodeType, serializeImageFieldState } from "@/lib/workflow/node-defaults";
 import { createWorkflowNode } from "@/lib/workflow/node-registry";
 import type {
   CropImageConfig,
@@ -52,7 +52,6 @@ function sanitizeNodeForExport(node: WorkflowCanvasNode): WorkflowCanvasNode {
 
   if (node.data.nodeType === "requestInputs") {
     const requestConfig = config as RequestInputsConfig;
-    const fileUrl = requestConfig.imageField.fileUrl;
 
     return {
       ...node,
@@ -60,18 +59,7 @@ function sanitizeNodeForExport(node: WorkflowCanvasNode): WorkflowCanvasNode {
         ...node.data,
         config: {
           ...requestConfig,
-          imageField: {
-            ...requestConfig.imageField,
-            fileUrl:
-              typeof fileUrl === "string" && fileUrl.startsWith("blob:")
-                ? null
-                : requestConfig.imageField.fileUrl,
-            uploadStatus:
-              requestConfig.imageField.fileUrl &&
-              !requestConfig.imageField.fileUrl.startsWith("blob:")
-                ? requestConfig.imageField.uploadStatus
-                : "idle",
-          },
+          imageField: serializeImageFieldState(requestConfig.imageField),
         },
       },
     };

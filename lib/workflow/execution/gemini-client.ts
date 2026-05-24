@@ -84,39 +84,43 @@ export function formatGeminiError(error: unknown): string {
   return message.length > 280 ? `${message.slice(0, 280)}…` : message;
 }
 
+const GEMINI_EMPTY_RESPONSE_FALLBACK = "Gemini returned an empty response.";
+
 function extractGeminiResponseText(payload: unknown): string {
   if (!payload || typeof payload !== "object") {
-    throw new Error("Gemini returned an empty response body.");
+    logGeminiDebug("Gemini response missing body — using fallback", {});
+    return GEMINI_EMPTY_RESPONSE_FALLBACK;
   }
 
   const record = payload as Record<string, unknown>;
   const candidates = record.candidates;
 
   if (!Array.isArray(candidates) || candidates.length === 0) {
-    const promptFeedback = record.promptFeedback;
-    throw new Error(
-      promptFeedback
-        ? `Gemini returned no candidates: ${JSON.stringify(promptFeedback)}`
-        : "Gemini returned no candidates.",
-    );
+    logGeminiDebug("Gemini response missing candidates — using fallback", {
+      promptFeedback: record.promptFeedback ?? null,
+    });
+    return GEMINI_EMPTY_RESPONSE_FALLBACK;
   }
 
   const firstCandidate = candidates[0];
 
   if (!firstCandidate || typeof firstCandidate !== "object") {
-    throw new Error("Gemini candidate payload was invalid.");
+    logGeminiDebug("Gemini candidate payload invalid — using fallback", {});
+    return GEMINI_EMPTY_RESPONSE_FALLBACK;
   }
 
   const content = (firstCandidate as Record<string, unknown>).content;
 
   if (!content || typeof content !== "object") {
-    throw new Error("Gemini candidate content was missing.");
+    logGeminiDebug("Gemini candidate content missing — using fallback", {});
+    return GEMINI_EMPTY_RESPONSE_FALLBACK;
   }
 
   const parts = (content as Record<string, unknown>).parts;
 
   if (!Array.isArray(parts)) {
-    throw new Error("Gemini candidate parts were missing.");
+    logGeminiDebug("Gemini candidate parts missing — using fallback", {});
+    return GEMINI_EMPTY_RESPONSE_FALLBACK;
   }
 
   const text = parts
@@ -133,7 +137,8 @@ function extractGeminiResponseText(payload: unknown): string {
     .trim();
 
   if (!text) {
-    throw new Error("Gemini returned an empty text response.");
+    logGeminiDebug("Gemini response empty text — using fallback", {});
+    return GEMINI_EMPTY_RESPONSE_FALLBACK;
   }
 
   return text;

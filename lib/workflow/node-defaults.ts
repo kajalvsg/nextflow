@@ -11,7 +11,28 @@ export function defaultImageFieldState(): ImageFieldState {
   return {
     fileName: null,
     fileUrl: null,
-    uploadStatus: "idle",
+    mimeType: null,
+    size: null,
+  };
+}
+
+/** Persist only saved upload metadata; strip UI-only fields from stored graphs. */
+export function serializeImageFieldState(
+  value: Partial<ImageFieldState> & Record<string, unknown>,
+): ImageFieldState {
+  const rawUrl = typeof value.fileUrl === "string" ? value.fileUrl.trim() : "";
+  const fileUrl =
+    rawUrl.length > 0 && !rawUrl.startsWith("blob:") ? rawUrl : null;
+
+  if (!fileUrl) {
+    return defaultImageFieldState();
+  }
+
+  return {
+    fileName: typeof value.fileName === "string" ? value.fileName : null,
+    fileUrl,
+    mimeType: typeof value.mimeType === "string" ? value.mimeType : null,
+    size: typeof value.size === "number" ? value.size : null,
   };
 }
 

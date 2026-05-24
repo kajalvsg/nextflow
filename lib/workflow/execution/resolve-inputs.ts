@@ -25,6 +25,8 @@ export function resolveRequestInputsOutput(
     image_field_meta: {
       fileName: config.imageField.fileName,
       fileUrl: config.imageField.fileUrl,
+      mimeType: config.imageField.mimeType,
+      size: config.imageField.size,
     },
   };
 }

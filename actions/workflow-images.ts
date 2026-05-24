@@ -6,6 +6,7 @@ import path from "path";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import type { ImageUploadResult } from "@/lib/upload/image-upload";
+import { ALLOWED_IMAGE_MIME_TYPES } from "@/lib/upload/image-upload";
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const UPLOAD_DIR = path.join(process.cwd(), "public", "workflow-assets");
@@ -64,8 +65,8 @@ export async function uploadWorkflowImageAction(
     throw new Error("No image file provided.");
   }
 
-  if (!file.type.startsWith("image/")) {
-    throw new Error("Please select a valid image file.");
+  if (!ALLOWED_IMAGE_MIME_TYPES.has(file.type)) {
+    throw new Error("Please upload a JPG, PNG, WebP, or GIF image.");
   }
 
   if (file.size > MAX_IMAGE_BYTES) {
