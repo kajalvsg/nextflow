@@ -1,8 +1,13 @@
+import type { Metadata } from "next";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getWorkflows } from "@/actions/workflows";
 import { DashboardContent } from "@/components/dashboard/DashboardContent";
 import { toWorkflowDTO } from "@/types/workflow";
+
+export const metadata: Metadata = {
+  title: "Dashboard",
+};
 
 export default async function DashboardPage() {
   const { userId } = await auth();
@@ -12,13 +17,26 @@ export default async function DashboardPage() {
   }
 
   const user = await currentUser();
-  const workflows = await getWorkflows();
-  const workflowDTOs = workflows.map(toWorkflowDTO);
+
+  let workflowDTOs: ReturnType<typeof toWorkflowDTO>[] = [];
+  let dbError: string | null = null;
+
+  try {
+    const workflows = await getWorkflows();
+    workflowDTOs = workflows.map(toWorkflowDTO);
+  } catch (error) {
+    console.error("[DashboardPage]", error);
+    dbError =
+      error instanceof Error
+        ? error.message
+        : "Could not load workflows from the database.";
+  }
 
   return (
     <DashboardContent
       initialWorkflows={workflowDTOs}
       userName={user?.firstName}
+      dbError={dbError}
     />
   );
 }

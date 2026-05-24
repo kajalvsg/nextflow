@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import {
   Background,
   BackgroundVariant,
@@ -26,6 +27,13 @@ import {
 } from "@/actions/workflow-execution";
 import { saveWorkflowGraph } from "@/actions/workflow-builder";
 import { PROTECTED_NODE_IDS, sanitizeGraphForSave } from "@/lib/workflow/canvas";
+import { prepareGraphPayload, serializeGraphPayload } from "@/lib/workflow/graph-payload";
+import {
+  buildWorkflowExportDocument,
+  createAssignmentSampleWorkflow,
+  downloadWorkflowJson,
+  parseWorkflowImportFile,
+} from "@/lib/workflow/import-export";
 import {
   isSourceHandleConnected,
   isTargetHandleConnected,
@@ -70,8 +78,17 @@ const nodeTypes = {
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 const TOAST_DURATION_MS = 3200;
-const RUN_POLL_INTERVAL_MS = 1500;
+const AUTOSAVE_DEBOUNCE_MS = 1200;
+const RUN_POLL_INTERVAL_MS = 4000;
 const RUN_STATUS_RESET_MS = 3500;
+
+function isPersistableNodeChange(change: NodeChange): boolean {
+  return change.type === "add" || change.type === "remove";
+}
+
+function isPersistableEdgeChange(change: EdgeChange): boolean {
+  return change.type === "add" || change.type === "remove";
+}
 
 type WorkflowCanvasInnerProps = {
   workflow: WorkflowBuilderDTO;
@@ -138,6 +155,13 @@ function isEditableTarget(element: EventTarget | null): boolean {
 }
 
 function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
+  const reactFlow = useReactFlow();
+  const router = useRouter();
+  const params = useParams<{ id: string }>();
+  const workflowId =
+    typeof params.id === "string" && params.id.trim().length > 0
+      ? params.id.trim()
+      : workflow.id;
   const [nodes, setNodes] = useState<Node<WorkflowNodeData>[]>(workflow.nodes);
   const [edges, setEdges] = useState<Edge[]>(workflow.edges);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
@@ -150,6 +174,8 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
   const [activeNodeIds, setActiveNodeIds] = useState<string[]>([]);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [runScopeLabel, setRunScopeLabel] = useState<string | null>(null);
+  const [canRunWorkflow, setCanRunWorkflow] = useState(true);
+  const [isLeaving, setIsLeaving] = useState(false);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -163,6 +189,13 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
   const fieldEditHistoryPendingRef = useRef(false);
   const lastValidationRef = useRef<string | null>(null);
   const connectSessionRef = useRef({ started: false, connected: false });
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const lastSavedGraphRef = useRef(
+    serializeGraphPayload(workflow.nodes, workflow.edges),
+  );
+  const workflowUnavailableRef = useRef(false);
+  const saveInFlightRef = useRef(false);
+  const workflowMissingToastShownRef = useRef(false);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -181,30 +214,97 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     }, TOAST_DURATION_MS);
   }, []);
 
+  const markWorkflowUnavailable = useCallback(
+    (message: string) => {
+      workflowUnavailableRef.current = true;
+      setCanRunWorkflow(false);
+      setSaveStatus("error");
+
+      if (!workflowMissingToastShownRef.current) {
+        workflowMissingToastShownRef.current = true;
+        showToast(message);
+      }
+    },
+    [showToast],
+  );
+
+  const runSave = useCallback(
+    async (
+      nextNodes: Node<WorkflowNodeData>[],
+      nextEdges: Edge[],
+      options: { force?: boolean } = {},
+    ): Promise<boolean> => {
+      if (workflowUnavailableRef.current || !isMountedRef.current) {
+        return false;
+      }
+
+      const payload = prepareGraphPayload(nextNodes, nextEdges);
+      const fingerprint = serializeGraphPayload(nextNodes, nextEdges);
+
+      if (!options.force && fingerprint === lastSavedGraphRef.current) {
+        setSaveStatus("saved");
+        setCanRunWorkflow(true);
+        return true;
+      }
+
+      if (saveInFlightRef.current) {
+        return false;
+      }
+
+      saveInFlightRef.current = true;
+      setSaveStatus("saving");
+
+      try {
+        const result = await saveWorkflowGraph({
+          id: workflowId,
+          nodes: payload.nodes,
+          edges: payload.edges,
+        });
+
+        if (!isMountedRef.current) {
+          return false;
+        }
+
+        if (result.success) {
+          lastSavedGraphRef.current = fingerprint;
+          setSaveStatus("saved");
+          setCanRunWorkflow(true);
+          return true;
+        }
+
+        setSaveStatus("error");
+        setCanRunWorkflow(false);
+
+        if (result.error?.toLowerCase().includes("not found")) {
+          markWorkflowUnavailable(
+            result.error ??
+              "This workflow no longer exists. Return to the dashboard.",
+          );
+        } else {
+          showToast(result.error ?? "Failed to save workflow.");
+        }
+
+        return false;
+      } finally {
+        saveInFlightRef.current = false;
+      }
+    },
+    [markWorkflowUnavailable, showToast, workflowId],
+  );
+
   const scheduleSave = useCallback(() => {
+    if (workflowUnavailableRef.current) {
+      return;
+    }
+
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
     }
 
     saveTimerRef.current = setTimeout(() => {
-      void (async () => {
-        setSaveStatus("saving");
-
-        const { nodes: sanitizedNodes, edges: sanitizedEdges } =
-          sanitizeGraphForSave(nodesRef.current, edgesRef.current);
-
-        const result = await saveWorkflowGraph({
-          id: workflow.id,
-          nodes: sanitizedNodes as unknown as Record<string, unknown>[],
-          edges: sanitizedEdges as unknown as Record<string, unknown>[],
-        });
-
-        if (!isMountedRef.current) return;
-
-        setSaveStatus(result.success ? "saved" : "error");
-      })();
-    }, 600);
-  }, [workflow.id]);
+      void runSave(nodesRef.current, edgesRef.current);
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }, [runSave]);
 
   const recordHistory = useCallback(() => {
     if (isHistoryActionRef.current) {
@@ -248,6 +348,187 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     },
     [scheduleSave],
   );
+
+  const persistGraphNow = useCallback(
+    async (
+      nextNodes: Node<WorkflowNodeData>[],
+      nextEdges: Edge[],
+      force = true,
+    ): Promise<boolean> => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+
+      return runSave(nextNodes, nextEdges, { force });
+    },
+    [runSave],
+  );
+
+  const replaceGraph = useCallback(
+    async (
+      nextNodes: Node<WorkflowNodeData>[],
+      nextEdges: Edge[],
+      successMessage: string,
+    ) => {
+      recordHistory();
+      isHistoryActionRef.current = true;
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+      nodesRef.current = nextNodes;
+      edgesRef.current = nextEdges;
+      historyRef.current = pushHistory(
+        historyRef.current,
+        cloneGraphSnapshot(nextNodes, nextEdges),
+      );
+      isHistoryActionRef.current = false;
+
+      const saved = await persistGraphNow(nextNodes, nextEdges);
+
+      if (saved) {
+        showToast(successMessage);
+        setTimeout(() => {
+          reactFlow.fitView({ padding: 0.2, duration: 300 });
+        }, 50);
+      }
+
+      return saved;
+    },
+    [persistGraphNow, recordHistory, showToast, reactFlow],
+  );
+
+  const handleNavigateToDashboard = useCallback(async () => {
+    if (isLeaving) {
+      return;
+    }
+
+    if (isWorkflowRunning) {
+      showToast("Wait for the workflow run to finish before leaving.");
+      return;
+    }
+
+    setIsLeaving(true);
+
+    try {
+      const shouldSaveBeforeLeave =
+        saveTimerRef.current !== null ||
+        saveStatus === "saving" ||
+        saveStatus === "error";
+
+      if (shouldSaveBeforeLeave) {
+        const saved = await persistGraphNow(
+          nodesRef.current,
+          edgesRef.current,
+        );
+
+        if (!saved) {
+          const leaveAnyway = window.confirm(
+            "Could not save your latest changes. Go to the dashboard anyway?",
+          );
+
+          if (!leaveAnyway) {
+            return;
+          }
+        }
+      }
+
+      router.push("/dashboard");
+    } finally {
+      if (isMountedRef.current) {
+        setIsLeaving(false);
+      }
+    }
+  }, [
+    isLeaving,
+    isWorkflowRunning,
+    persistGraphNow,
+    router,
+    saveStatus,
+    showToast,
+  ]);
+
+  const handleExportJson = useCallback(() => {
+    const { nodes: sanitizedNodes, edges: sanitizedEdges } =
+      sanitizeGraphForSave(nodesRef.current, edgesRef.current);
+
+    const exportDocument = buildWorkflowExportDocument({
+      name: workflow.name,
+      nodes: sanitizedNodes,
+      edges: sanitizedEdges,
+      createdAt: workflow.createdAt,
+      updatedAt: workflow.updatedAt,
+    });
+
+    const slug =
+      workflow.name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || "workflow";
+
+    downloadWorkflowJson(exportDocument, `${slug}-workflow.json`);
+    showToast("Workflow exported as JSON.");
+  }, [showToast, workflow.createdAt, workflow.name, workflow.updatedAt]);
+
+  const handleImportJsonClick = useCallback(() => {
+    importFileInputRef.current?.click();
+  }, []);
+
+  const handleImportFileChange = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+
+      if (!file) {
+        return;
+      }
+
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text) as unknown;
+        const result = parseWorkflowImportFile(parsed);
+
+        if (!result.success) {
+          showToast(result.error);
+          return;
+        }
+
+        const confirmed = window.confirm(
+          "Replace the current workflow with the imported JSON? This cannot be undone except with Undo.",
+        );
+
+        if (!confirmed) {
+          return;
+        }
+
+        await replaceGraph(
+          result.nodes,
+          result.edges,
+          "Workflow imported and saved.",
+        );
+      } catch {
+        showToast("Invalid JSON file. Could not parse the uploaded document.");
+      }
+    },
+    [replaceGraph, showToast],
+  );
+
+  const handleLoadSample = useCallback(async () => {
+    const confirmed = window.confirm(
+      "Replace the current workflow with the assignment sample? This cannot be undone except with Undo.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const sample = createAssignmentSampleWorkflow();
+    await replaceGraph(
+      sample.nodes,
+      sample.edges,
+      "Sample workflow loaded and saved.",
+    );
+  }, [replaceGraph]);
 
   const undo = useCallback(() => {
     const present = cloneGraphSnapshot(nodesRef.current, edgesRef.current);
@@ -312,6 +593,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
       const hasRemove = changes.some((change) => change.type === "remove");
+      const shouldPersist = changes.some(isPersistableNodeChange);
 
       if (hasRemove) {
         recordHistory();
@@ -325,9 +607,12 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       setNodes((current) => {
         const next = applyNodeChanges(filtered, current);
         nodesRef.current = next;
-        scheduleSave();
         return next;
       });
+
+      if (shouldPersist) {
+        scheduleSave();
+      }
     },
     [recordHistory, scheduleSave],
   );
@@ -347,6 +632,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
       const hasRemove = changes.some((change) => change.type === "remove");
+      const shouldPersist = changes.some(isPersistableEdgeChange);
 
       if (hasRemove) {
         recordHistory();
@@ -355,9 +641,12 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       setEdges((current) => {
         const next = applyEdgeChanges(changes, current);
         edgesRef.current = next;
-        scheduleSave();
         return next;
       });
+
+      if (shouldPersist) {
+        scheduleSave();
+      }
     },
     [recordHistory, scheduleSave],
   );
@@ -600,6 +889,11 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       return;
     }
 
+    if (!canRunWorkflow || saveStatus === "error") {
+      showToast("Save the workflow before running. Fix any save errors first.");
+      return;
+    }
+
     const selectedNodeIds = nodesRef.current
       .filter((node) => node.selected)
       .map((node) => node.id);
@@ -623,42 +917,50 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     setNodeStatuses({});
     setActiveNodeIds([]);
 
-    const { nodes: sanitizedNodes, edges: sanitizedEdges } =
-      sanitizeGraphForSave(nodesRef.current, edgesRef.current);
+    const saved = await persistGraphNow(nodesRef.current, edgesRef.current);
 
-    const saveResult = await saveWorkflowGraph({
-      id: workflow.id,
-      nodes: sanitizedNodes as unknown as Record<string, unknown>[],
-      edges: sanitizedEdges as unknown as Record<string, unknown>[],
-    });
-
-    if (!saveResult.success) {
+    if (!saved) {
       resetRunVisualState();
-      showToast(saveResult.error ?? "Could not save workflow before run.");
       return;
     }
 
     const result = await startWorkflowRun({
-      workflowId: workflow.id,
+      workflowId,
       scope,
       selectedNodeIds,
-      nodes: sanitizedNodes as unknown as Record<string, unknown>[],
-      edges: sanitizedEdges as unknown as Record<string, unknown>[],
     });
 
     if (!result.success) {
       resetRunVisualState();
-      showToast(result.error);
+
+      if (result.error?.toLowerCase().includes("not found")) {
+        markWorkflowUnavailable(
+          result.error ??
+            "This workflow no longer exists. Return to the dashboard.",
+        );
+      } else {
+        showToast(result.error ?? "Failed to start workflow run.");
+      }
+
       return;
     }
 
     setActiveRunId(result.runId);
     setHistoryRefreshKey((current) => current + 1);
     showToast("Workflow run started.");
-  }, [isWorkflowRunning, resetRunVisualState, showToast, workflow.id]);
+  }, [
+    canRunWorkflow,
+    isWorkflowRunning,
+    markWorkflowUnavailable,
+    persistGraphNow,
+    resetRunVisualState,
+    saveStatus,
+    showToast,
+    workflowId,
+  ]);
 
   useEffect(() => {
-    if (!activeRunId) {
+    if (!activeRunId || !isWorkflowRunning) {
       return;
     }
 
@@ -667,9 +969,24 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     let interval: ReturnType<typeof setInterval> | null = null;
 
     const poll = async () => {
+      if (cancelled || !isWorkflowRunning) {
+        return;
+      }
+
       const state = await getActiveRunState(activeRunId);
 
-      if (cancelled || !state) {
+      if (cancelled) {
+        return;
+      }
+
+      if (!state) {
+        if (interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+
+        setIsWorkflowRunning(false);
+        setActiveRunId(null);
         return;
       }
 
@@ -717,7 +1034,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
         clearTimeout(resetTimer);
       }
     };
-  }, [activeRunId, resetRunVisualState, showToast]);
+  }, [activeRunId, isWorkflowRunning, resetRunVisualState, showToast]);
 
   const runningNodeIdSet = useMemo(
     () => new Set(activeNodeIds),
@@ -767,8 +1084,21 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
             workflowName={workflow.name}
             saveStatus={saveStatus}
             isRunning={isWorkflowRunning}
+            isLeaving={isLeaving}
+            canRun={canRunWorkflow && saveStatus !== "error"}
             runScopeLabel={runScopeLabel}
+            onNavigateDashboard={() => void handleNavigateToDashboard()}
             onRun={() => void handleRun()}
+            onExportJson={handleExportJson}
+            onImportJson={handleImportJsonClick}
+            onLoadSample={() => void handleLoadSample()}
+          />
+          <input
+            ref={importFileInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(event) => void handleImportFileChange(event)}
           />
           <div className="workflow-canvas relative min-h-0 flex-1">
           <WorkflowToast message={toastMessage} />

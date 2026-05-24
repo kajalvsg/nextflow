@@ -1,10 +1,10 @@
-import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaNeon } from "@prisma/adapter-neon";
 import { PrismaClient } from "@prisma/client";
-import { Pool } from "pg";
+import { neonConfig } from "@neondatabase/serverless";
+import ws from "ws";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
-  pool: Pool | undefined;
 };
 
 function createPrismaClient() {
@@ -14,27 +14,14 @@ function createPrismaClient() {
     throw new Error("DATABASE_URL environment variable is not set");
   }
 
-  const pool =
-    globalForPrisma.pool ??
-    new Pool({
-      connectionString,
-      max: 5,
-      connectionTimeoutMillis: 60_000,
-      idleTimeoutMillis: 30_000,
-      keepAlive: true,
-    });
-  const adapter = new PrismaPg(pool);
+  // WebSocket transport avoids TCP/5432 timeouts on restricted networks (Neon pooler).
+  neonConfig.webSocketConstructor = ws;
 
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.pool = pool;
-  }
+  const adapter = new PrismaNeon({ connectionString });
 
   return new PrismaClient({
     adapter,
-    log:
-      process.env.NODE_ENV === "development"
-        ? ["query", "error", "warn"]
-        : ["error"],
+    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
 }
 

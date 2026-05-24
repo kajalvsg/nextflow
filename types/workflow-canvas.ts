@@ -52,6 +52,21 @@ export type WorkflowBuilderDTO = {
   name: string;
   nodes: WorkflowCanvasNode[];
   edges: WorkflowCanvasEdge[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type WorkflowExportDocument = {
+  format: "nextflow-workflow";
+  version: number;
+  exportedAt: string;
+  workflow: {
+    name: string;
+    createdAt?: string;
+    updatedAt?: string;
+  };
+  nodes: WorkflowCanvasNode[];
+  edges: WorkflowCanvasEdge[];
 };
 
 export type NodePickerItem = {

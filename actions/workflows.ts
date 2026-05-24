@@ -4,7 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { withDbRetry } from "@/lib/db/retry";
+import { getDbErrorMessage, withDbTimeout } from "@/lib/db/retry";
 import type { ActionResult, WorkflowSummary } from "@/types/workflow";
 import { toWorkflowDTO, type WorkflowSummaryDTO } from "@/types/workflow";
 
@@ -68,24 +68,29 @@ async function requireUserId(): Promise<string> {
 }
 
 export async function getWorkflows(): Promise<WorkflowSummary[]> {
-  const userId = await requireUserId();
+  try {
+    const userId = await requireUserId();
 
-  const workflows = await withDbRetry(() =>
-    db.workflow.findMany({
-      where: { userId },
-      orderBy: { updatedAt: "desc" },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    }),
-  );
+    const workflows = await withDbTimeout(() =>
+      db.workflow.findMany({
+        where: { userId },
+        orderBy: { updatedAt: "desc" },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+    );
 
-  return workflows.map(serializeWorkflow);
+    return workflows.map(serializeWorkflow);
+  } catch (error) {
+    console.error("[getWorkflows]", error);
+    throw new Error(getDbErrorMessage(error));
+  }
 }
 
 export async function createWorkflow(

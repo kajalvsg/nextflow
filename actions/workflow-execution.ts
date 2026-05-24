@@ -4,7 +4,8 @@ import { auth } from "@clerk/nextjs/server";
 import { tasks } from "@trigger.dev/sdk/v3";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { parseStoredGraph, sanitizeGraphForSave } from "@/lib/workflow/canvas";
+import { parseStoredGraph } from "@/lib/workflow/canvas";
+import { prepareGraphPayload } from "@/lib/workflow/graph-payload";
 import { planExecutionNodeIds } from "@/lib/workflow/execution/dag";
 import { createWorkflowRunRecord, nodeDisplayName } from "@/lib/workflow/execution/run-store";
 import type { workflowOrchestratorTask } from "@/trigger/workflow-orchestrator";
@@ -22,8 +23,6 @@ const startRunSchema = z.object({
   workflowId: z.string().min(1),
   scope: z.enum(["full", "single", "partial"]),
   selectedNodeIds: z.array(z.string()).optional(),
-  nodes: z.array(z.record(z.string(), z.unknown())),
-  edges: z.array(z.record(z.string(), z.unknown())),
 });
 
 async function requireUserId(): Promise<string> {
@@ -64,16 +63,19 @@ export async function startWorkflowRun(
       };
     }
 
-    const { workflowId, scope, selectedNodeIds = [], nodes, edges } =
-      parsed.data;
+    const { workflowId, scope, selectedNodeIds = [] } = parsed.data;
+    const normalizedWorkflowId = workflowId.trim();
 
     const workflow = await db.workflow.findFirst({
-      where: { id: workflowId, userId },
-      select: { id: true },
+      where: { id: normalizedWorkflowId, userId },
+      select: { id: true, nodes: true, edges: true },
     });
 
     if (!workflow) {
-      return { success: false, error: "Workflow not found." };
+      return {
+        success: false,
+        error: `Workflow not found for "${normalizedWorkflowId}". Save the workflow and try again.`,
+      };
     }
 
     if (scope === "single" && selectedNodeIds.length === 0) {
@@ -87,7 +89,7 @@ export async function startWorkflowRun(
       };
     }
 
-    const graph = parseStoredGraph(nodes, edges);
+    const graph = parseStoredGraph(workflow.nodes, workflow.edges);
     const plannedNodeIds = planExecutionNodeIds(
       scope as RunScope,
       graph.nodes,
@@ -103,19 +105,19 @@ export async function startWorkflowRun(
       }));
 
     const run = await createWorkflowRunRecord({
-      workflowId,
+      workflowId: normalizedWorkflowId,
       userId,
       scope: scope as RunScope,
       plannedNodes,
     });
 
-    const sanitized = sanitizeGraphForSave(graph.nodes, graph.edges);
+    const sanitized = prepareGraphPayload(graph.nodes, graph.edges);
 
     await tasks.trigger<typeof workflowOrchestratorTask>(
       "workflow-orchestrator",
       {
         runId: run.id,
-        workflowId,
+        workflowId: normalizedWorkflowId,
         userId,
         scope: scope as RunScope,
         nodes: sanitized.nodes as unknown as Record<string, unknown>[],

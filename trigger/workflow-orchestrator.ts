@@ -306,7 +306,11 @@ export const workflowOrchestratorTask = task({
           break;
         }
 
-        await Promise.all(ready.map((nodeId) => runExecutableNode(nodeId)));
+        // Trigger.dev forbids Promise.all around triggerAndWait (parallel waits).
+        // Run each ready node one at a time; DAG still ensures dependencies first.
+        for (const nodeId of ready) {
+          await runExecutableNode(nodeId);
+        }
       }
 
       if (plannedNodeIds.has("response")) {

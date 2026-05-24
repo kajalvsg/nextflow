@@ -20,6 +20,11 @@ export default async function WorkflowPage({ params }: WorkflowPageProps) {
   }
 
   const { id } = await params;
+
+  if (!id?.trim()) {
+    redirect("/dashboard");
+  }
+
   const workflow = await getWorkflowForBuilder(id);
 
   if (!workflow) {

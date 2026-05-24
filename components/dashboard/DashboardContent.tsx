@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Container, PageSection } from "@/components/layout";
+import { Card } from "@/components/ui/Card";
 import type { WorkflowSummaryDTO } from "@/types/workflow";
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
 import { DashboardNavbar } from "./DashboardNavbar";
@@ -11,11 +12,13 @@ import { WorkflowList } from "./WorkflowList";
 type DashboardContentProps = {
   initialWorkflows: WorkflowSummaryDTO[];
   userName?: string | null;
+  dbError?: string | null;
 };
 
 export function DashboardContent({
   initialWorkflows,
   userName,
+  dbError = null,
 }: DashboardContentProps) {
   const [workflows, setWorkflows] = useState(initialWorkflows);
   const [createOpen, setCreateOpen] = useState(false);
@@ -55,6 +58,21 @@ export function DashboardContent({
       <PageSection spacing="lg">
         <Container size="lg">
           <div className="stack-lg">
+            {dbError ? (
+              <Card variant="elevated" padding="md" className="border-red-500/30">
+                <div className="stack-sm">
+                  <p className="text-body-sm font-medium text-red-400">
+                    Database connection issue
+                  </p>
+                  <p className="text-body-sm text-muted">{dbError}</p>
+                  <p className="text-caption text-muted-foreground">
+                    Verify DATABASE_URL in .env.local points to your Neon pooler
+                    URL, then restart the dev server.
+                  </p>
+                </div>
+              </Card>
+            ) : null}
+
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div className="stack-sm">
                 <h2 className="text-heading text-foreground">Your workflows</h2>
