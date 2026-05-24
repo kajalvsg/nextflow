@@ -578,11 +578,34 @@ html.dark .cl-userButtonPopoverFooter svg {
 }
 
 .workflow-node-running {
+  border-color: rgba(251, 191, 36, 0.75) !important;
   animation: workflow-node-pulse 1.6s ease-in-out infinite;
+}
+
+.workflow-node-success {
+  border-color: rgba(34, 197, 94, 0.75) !important;
+  box-shadow:
+    0 0 16px rgba(34, 197, 94, 0.35),
+    0 0 32px rgba(34, 197, 94, 0.15);
+}
+
+.workflow-node-failed {
+  border-color: rgba(248, 113, 113, 0.75) !important;
+  box-shadow:
+    0 0 16px rgba(248, 113, 113, 0.35),
+    0 0 32px rgba(248, 113, 113, 0.15);
+}
+
+@keyframes workflow-edge-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
 }
 
 .workflow-canvas .react-flow__edge.workflow-edge-running .react-flow__edge-path {
   stroke: #fbbf24;
   stroke-width: 2.5;
+  stroke-dasharray: 8 4;
+  animation: workflow-edge-flow 0.8s linear infinite;
   filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.6));
 }

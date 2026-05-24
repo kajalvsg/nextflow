@@ -733,11 +733,11 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
         return {
           ...edge,
-          animated: edge.animated || touchesRunning,
+          animated: isWorkflowRunning ? touchesRunning : (edge.animated ?? true),
           className: touchesRunning ? "workflow-edge-running" : edge.className,
         };
       }),
-    [edges, runningNodeIdSet],
+    [edges, runningNodeIdSet, isWorkflowRunning],
   );
 
   const builderContextValue = useMemo(

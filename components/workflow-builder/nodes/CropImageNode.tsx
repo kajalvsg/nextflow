@@ -9,7 +9,7 @@ import { NodeCardShell } from "./NodeCardShell";
 import { NodeHandle } from "./NodeHandle";
 
 export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData>) {
-  const { updateNodeData } = useWorkflowBuilder();
+  const { updateNodeData, getNodeExecutionStatus } = useWorkflowBuilder();
   const config = data.config as CropImageConfig;
 
   const updateConfig = (patch: Partial<CropImageConfig>) => {
@@ -29,6 +29,7 @@ export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData
         subtitle="Image Processing"
         icon={Crop}
         selected={selected}
+        executionStatus={getNodeExecutionStatus(id)}
       >
         <div className="nodrag nopan nowheel grid grid-cols-2 gap-3">
           <Input

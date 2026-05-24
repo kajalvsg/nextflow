@@ -33,12 +33,12 @@ export function NodeCardShell({
     <div
       className={cn(
         "relative min-w-[360px] max-w-[420px] rounded-card border bg-surface shadow-card transition-shadow",
-        selected
+        selected && executionStatus === "idle"
           ? "border-accent shadow-elevated ring-2 ring-accent/30"
           : "border-border",
         executionStatus === "running" && "workflow-node-running",
-        executionStatus === "success" && "border-success/60",
-        executionStatus === "failed" && "border-danger/60",
+        executionStatus === "success" && "workflow-node-success",
+        executionStatus === "failed" && "workflow-node-failed",
         className,
       )}
     >

@@ -10,7 +10,7 @@ import { NodeCardShell } from "./NodeCardShell";
 import { NodeHandle } from "./NodeHandle";
 
 export function GeminiProNode({ id, data, selected }: NodeProps<WorkflowNodeData>) {
-  const { updateNodeData } = useWorkflowBuilder();
+  const { updateNodeData, getNodeExecutionStatus } = useWorkflowBuilder();
   const config = data.config as GeminiProConfig;
 
   const updateConfig = (patch: Partial<GeminiProConfig>) => {
@@ -32,6 +32,7 @@ export function GeminiProNode({ id, data, selected }: NodeProps<WorkflowNodeData
         subtitle="AI Model"
         icon={Sparkles}
         selected={selected}
+        executionStatus={getNodeExecutionStatus(id)}
       >
         <p className="text-body-sm text-muted">
           Connect prompt, system prompt, and optional vision image inputs.
