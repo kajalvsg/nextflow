@@ -2,7 +2,7 @@
 
 import { createContext, useContext } from "react";
 import type { WorkflowNodeData } from "@/types/workflow-canvas";
-import type { NodeRuntimeStatus } from "@/types/workflow-execution";
+import type { NodeInlineExecutionState, NodeRuntimeStatus } from "@/types/workflow-execution";
 
 type WorkflowBuilderContextValue = {
   workflowId: string;
@@ -13,6 +13,7 @@ type WorkflowBuilderContextValue = {
   isSourceHandleConnected: (nodeId: string, handleId: string) => boolean;
   isTargetHandleConnected: (nodeId: string, handleId: string) => boolean;
   getNodeExecutionStatus: (nodeId: string) => NodeRuntimeStatus;
+  getNodeInlineExecution: (nodeId: string) => NodeInlineExecutionState | null;
   isWorkflowRunning: boolean;
 };
 

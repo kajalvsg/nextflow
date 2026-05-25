@@ -53,7 +53,7 @@ export function NodePicker({ onSelectType }: NodePickerProps) {
   };
 
   return (
-    <div className="nodrag nopan nowheel flex flex-col items-center gap-3">
+    <div className="nodrag nopan nowheel pointer-events-auto flex flex-col items-center gap-3">
       {open ? (
         <div className="w-[min(92vw,420px)] rounded-card border border-border bg-surface shadow-elevated">
           <div className="flex items-center justify-between border-b border-border-soft px-4 py-3">

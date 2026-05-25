@@ -30,8 +30,23 @@ export type GeminiEnvSnapshot = {
   envFileHint: string;
 };
 
+/** Stable fast models for workflow execution (vision-capable). */
+export const GEMINI_STABLE_FLASH_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-1.5-flash",
+] as const;
+
+/** Default when GEMINI_MODEL is unset — 1.5 Flash tends to be more available on free tier. */
+export const GEMINI_DEFAULT_MODEL = "gemini-1.5-flash";
+
 export function getGeminiModelName(): string {
-  return process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+  const configured = process.env.GEMINI_MODEL?.trim();
+
+  if (configured) {
+    return configured;
+  }
+
+  return GEMINI_DEFAULT_MODEL;
 }
 
 export function getGeminiEndpoint(model?: string): string {

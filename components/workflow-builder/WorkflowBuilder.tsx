@@ -7,7 +7,6 @@ import {
   BackgroundVariant,
   Controls,
   MiniMap,
-  Panel,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
@@ -23,6 +22,7 @@ import {
 import "reactflow/dist/style.css";
 import {
   getActiveRunState,
+  getLatestWorkflowInlineExecutions,
   startWorkflowRun,
 } from "@/actions/workflow-execution";
 import { saveWorkflowGraph } from "@/actions/workflow-builder";
@@ -55,6 +55,7 @@ import type {
   WorkflowNodeData,
 } from "@/types/workflow-canvas";
 import type {
+  NodeInlineExecutionState,
   NodeRuntimeStatus,
   RunScope,
 } from "@/types/workflow-execution";
@@ -82,6 +83,43 @@ const AUTOSAVE_DEBOUNCE_MS = 1200;
 const RUN_POLL_INTERVAL_MS = 4000;
 const RUN_STATUS_RESET_MS = 3500;
 
+function mapSnapshotsToInlineExecutions(
+  snapshots: Record<
+    string,
+  {
+    status: NodeRuntimeStatus;
+    output: unknown;
+    error: string | null;
+  }
+  >,
+): Record<string, NodeInlineExecutionState> {
+  return Object.fromEntries(
+    Object.entries(snapshots).map(([nodeId, snapshot]) => [
+      nodeId,
+      {
+        status: snapshot.status,
+        output: snapshot.output,
+        error: snapshot.error,
+      },
+    ]),
+  );
+}
+
+function createUpdatingInlineExecutions(
+  nodeIds: string[],
+): Record<string, NodeInlineExecutionState> {
+  return Object.fromEntries(
+    nodeIds.map((nodeId) => [
+      nodeId,
+      {
+        status: "updating" as const,
+        output: null,
+        error: null,
+      },
+    ]),
+  );
+}
+
 function isPersistableNodeChange(change: NodeChange): boolean {
   return change.type === "add" || change.type === "remove";
 }
@@ -101,7 +139,7 @@ type NodePickerPanelProps = {
   ) => void;
 };
 
-function NodePickerPanel({ onAddNode }: NodePickerPanelProps) {
+function NodePickerOverlay({ onAddNode }: NodePickerPanelProps) {
   const reactFlow = useReactFlow();
 
   const handleSelectType = useCallback(
@@ -113,9 +151,9 @@ function NodePickerPanel({ onAddNode }: NodePickerPanelProps) {
   );
 
   return (
-    <Panel position="bottom-center" className="!mb-6 !mt-0">
+    <div className="workflow-node-picker-overlay pointer-events-none absolute inset-x-0 bottom-6 flex justify-center">
       <NodePicker onSelectType={handleSelectType} />
-    </Panel>
+    </div>
   );
 }
 
@@ -172,6 +210,9 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     Record<string, NodeRuntimeStatus>
   >({});
   const [activeNodeIds, setActiveNodeIds] = useState<string[]>([]);
+  const [nodeInlineExecutions, setNodeInlineExecutions] = useState<
+    Record<string, NodeInlineExecutionState>
+  >({});
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [runScopeLabel, setRunScopeLabel] = useState<string | null>(null);
   const [canRunWorkflow, setCanRunWorkflow] = useState(true);
@@ -876,6 +917,39 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     [nodeStatuses],
   );
 
+  const getNodeInlineExecution = useCallback(
+    (nodeId: string): NodeInlineExecutionState | null =>
+      nodeInlineExecutions[nodeId] ?? null,
+    [nodeInlineExecutions],
+  );
+
+  const reloadInlineExecutions = useCallback(async () => {
+    const executions = await getLatestWorkflowInlineExecutions(workflowId);
+    setNodeInlineExecutions((previous) => ({
+      ...previous,
+      ...executions,
+    }));
+  }, [workflowId]);
+
+  const applyRunExecutionSnapshots = useCallback(
+    (
+      snapshots: Record<
+        string,
+        {
+          status: NodeRuntimeStatus;
+          output: unknown;
+          error: string | null;
+        }
+      >,
+    ) => {
+      setNodeInlineExecutions((previous) => ({
+        ...previous,
+        ...mapSnapshotsToInlineExecutions(snapshots),
+      }));
+    },
+    [],
+  );
+
   const resetRunVisualState = useCallback(() => {
     setNodeStatuses({});
     setActiveNodeIds([]);
@@ -916,11 +990,18 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     setIsWorkflowRunning(true);
     setNodeStatuses({});
     setActiveNodeIds([]);
+    setNodeInlineExecutions((previous) => ({
+      ...previous,
+      ...createUpdatingInlineExecutions(
+        nodesRef.current.map((node) => node.id),
+      ),
+    }));
 
     const saved = await persistGraphNow(nodesRef.current, edgesRef.current);
 
     if (!saved) {
       resetRunVisualState();
+      await reloadInlineExecutions();
       return;
     }
 
@@ -932,6 +1013,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
     if (!result.success) {
       resetRunVisualState();
+      await reloadInlineExecutions();
 
       if (result.error?.toLowerCase().includes("not found")) {
         markWorkflowUnavailable(
@@ -953,6 +1035,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     isWorkflowRunning,
     markWorkflowUnavailable,
     persistGraphNow,
+    reloadInlineExecutions,
     resetRunVisualState,
     saveStatus,
     showToast,
@@ -992,6 +1075,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
       setNodeStatuses(state.nodeStatuses);
       setActiveNodeIds(state.activeNodeIds);
+      applyRunExecutionSnapshots(state.nodeExecutions);
 
       if (state.status !== "running") {
         if (interval) {
@@ -1001,6 +1085,24 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
         setIsWorkflowRunning(false);
         setHistoryRefreshKey((current) => current + 1);
+
+        void reloadInlineExecutions().then(() => {
+          if (cancelled) {
+            return;
+          }
+
+          setNodeInlineExecutions((previous) => {
+            const next = { ...previous };
+
+            for (const [nodeId, inline] of Object.entries(next)) {
+              if (inline.status === "updating") {
+                delete next[nodeId];
+              }
+            }
+
+            return next;
+          });
+        });
 
         if (state.status === "success") {
           showToast("Workflow run completed.");
@@ -1034,7 +1136,31 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
         clearTimeout(resetTimer);
       }
     };
-  }, [activeRunId, isWorkflowRunning, resetRunVisualState, showToast]);
+  }, [
+    activeRunId,
+    applyRunExecutionSnapshots,
+    isWorkflowRunning,
+    reloadInlineExecutions,
+    resetRunVisualState,
+    showToast,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void getLatestWorkflowInlineExecutions(workflowId).then((executions) => {
+      if (!cancelled) {
+        setNodeInlineExecutions((previous) => ({
+          ...previous,
+          ...executions,
+        }));
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workflowId, historyRefreshKey]);
 
   const runningNodeIdSet = useMemo(
     () => new Set(activeNodeIds),
@@ -1064,6 +1190,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       isSourceHandleConnected: isSourceConnected,
       isTargetHandleConnected: isTargetConnected,
       getNodeExecutionStatus,
+      getNodeInlineExecution,
       isWorkflowRunning,
     }),
     [
@@ -1072,36 +1199,37 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       isSourceConnected,
       isTargetConnected,
       getNodeExecutionStatus,
+      getNodeInlineExecution,
       isWorkflowRunning,
     ],
   );
 
   return (
     <WorkflowBuilderProvider value={builderContextValue}>
-      <div className="flex h-full min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
-          <WorkflowBuilderTopBar
-            workflowName={workflow.name}
-            saveStatus={saveStatus}
-            isRunning={isWorkflowRunning}
-            isLeaving={isLeaving}
-            canRun={canRunWorkflow && saveStatus !== "error"}
-            runScopeLabel={runScopeLabel}
-            onNavigateDashboard={() => void handleNavigateToDashboard()}
-            onRun={() => void handleRun()}
-            onExportJson={handleExportJson}
-            onImportJson={handleImportJsonClick}
-            onLoadSample={() => void handleLoadSample()}
-          />
-          <input
-            ref={importFileInputRef}
-            type="file"
-            accept="application/json,.json"
-            className="hidden"
-            onChange={(event) => void handleImportFileChange(event)}
-          />
-          <div className="workflow-canvas relative min-h-0 flex-1">
-          <WorkflowToast message={toastMessage} />
+      <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+        <WorkflowBuilderTopBar
+          workflowName={workflow.name}
+          saveStatus={saveStatus}
+          isRunning={isWorkflowRunning}
+          isLeaving={isLeaving}
+          canRun={canRunWorkflow && saveStatus !== "error"}
+          runScopeLabel={runScopeLabel}
+          onNavigateDashboard={() => void handleNavigateToDashboard()}
+          onRun={() => void handleRun()}
+          onExportJson={handleExportJson}
+          onImportJson={handleImportJsonClick}
+          onLoadSample={() => void handleLoadSample()}
+        />
+        <input
+          ref={importFileInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(event) => void handleImportFileChange(event)}
+        />
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <div className="workflow-canvas relative min-h-0 min-w-0 flex-1">
+            <WorkflowToast message={toastMessage} />
           <ReactFlow
             nodes={nodes}
             edges={displayEdges}
@@ -1138,14 +1266,14 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
               nodeColor="#8b7cf7"
               maskColor="rgb(12 12 16 / 0.75)"
             />
-            <NodePickerPanel onAddNode={addNode} />
           </ReactFlow>
+            <NodePickerOverlay onAddNode={addNode} />
+          </div>
+          <WorkflowHistoryPanel
+            workflowId={workflow.id}
+            refreshKey={historyRefreshKey}
+          />
         </div>
-        </div>
-        <WorkflowHistoryPanel
-          workflowId={workflow.id}
-          refreshKey={historyRefreshKey}
-        />
       </div>
     </WorkflowBuilderProvider>
   );

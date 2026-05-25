@@ -8,9 +8,11 @@ import { cn } from "@/lib/utils/cn";
 import { useWorkflowBuilder } from "../WorkflowBuilderContext";
 import { NodeCardShell } from "./NodeCardShell";
 import { NodeHandle } from "./NodeHandle";
+import { NodeInlineOutputSection } from "./NodeInlineOutputSection";
 
 export function GeminiProNode({ id, data, selected }: NodeProps<WorkflowNodeData>) {
-  const { updateNodeData, getNodeExecutionStatus } = useWorkflowBuilder();
+  const { updateNodeData, getNodeExecutionStatus, getNodeInlineExecution } =
+    useWorkflowBuilder();
   const config = data.config as GeminiProConfig;
 
   const updateConfig = (patch: Partial<GeminiProConfig>) => {
@@ -80,6 +82,12 @@ export function GeminiProNode({ id, data, selected }: NodeProps<WorkflowNodeData
             </div>
           ) : null}
         </div>
+
+        <NodeInlineOutputSection
+          sectionLabel="Response"
+          nodeType="geminiPro"
+          inlineExecution={getNodeInlineExecution(id)}
+        />
       </NodeCardShell>
     </div>
   );

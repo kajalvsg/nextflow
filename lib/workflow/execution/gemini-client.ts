@@ -69,12 +69,12 @@ export function formatGeminiError(error: unknown): string {
     message.toLowerCase().includes("resource_exhausted")
   ) {
     const model = getGeminiModelName();
-    return `Gemini API quota exceeded for model "${model}". Try GEMINI_MODEL=gemini-2.5-flash, enable billing, or wait for your free-tier quota to reset.`;
+    return `Gemini API quota exceeded for model "${model}". Try GEMINI_MODEL=gemini-1.5-flash or gemini-2.5-flash, enable billing, or wait for your free-tier quota to reset.`;
   }
 
   if (message.includes("404") && message.toLowerCase().includes("not found")) {
     const model = getGeminiModelName();
-    return `Gemini model "${model}" was not found. Set GEMINI_MODEL=gemini-2.5-flash in .env.local and restart trigger:dev.`;
+    return `Gemini model "${model}" was not found. Set GEMINI_MODEL=gemini-1.5-flash or gemini-2.5-flash in .env.local and restart trigger:dev.`;
   }
 
   if (message.includes("API key") || message.includes("API_KEY")) {

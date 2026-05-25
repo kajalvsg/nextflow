@@ -28,6 +28,17 @@ export function WorkflowCard({
   const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const workflowHref = workflowRoute(workflow.id);
+  const metadataLabel = (() => {
+    if (workflow.updatedAt?.trim()) {
+      const updated = new Date(workflow.updatedAt);
+
+      if (!Number.isNaN(updated.getTime())) {
+        return `Last edited ${formatWorkflowDate(updated)}`;
+      }
+    }
+
+    return `Created ${formatWorkflowDate(workflow.createdAt)}`;
+  })();
 
   function handleDelete() {
     setError(null);
@@ -74,9 +85,7 @@ export function WorkflowCard({
           </Badge>
         </div>
 
-        <p className="text-caption text-muted-foreground">
-          Created {formatWorkflowDate(workflow.createdAt)}
-        </p>
+        <p className="text-caption text-muted-foreground">{metadataLabel}</p>
 
         {error ? <p className="text-caption text-red-400">{error}</p> : null}
       </div>

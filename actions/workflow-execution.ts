@@ -12,12 +12,14 @@ import type { workflowOrchestratorTask } from "@/trigger/workflow-orchestrator";
 import type {
   ActiveRunState,
   NodeExecutionDetail,
+  NodeExecutionSnapshot,
+  NodeInlineExecutionState,
+  NodeRuntimeStatus,
   RunScope,
   StartRunResult,
   WorkflowRunDetail,
   WorkflowRunSummary,
 } from "@/types/workflow-execution";
-import type { NodeRuntimeStatus } from "@/types/workflow-execution";
 
 const startRunSchema = z.object({
   workflowId: z.string().min(1),
@@ -41,6 +43,103 @@ function getTriggerConfigError(): string | null {
   }
 
   return null;
+}
+
+function mapExecutionStatusToRuntime(
+  status: NodeExecutionDetail["status"],
+): NodeRuntimeStatus | null {
+  if (status === "running") {
+    return "running";
+  }
+
+  if (status === "success") {
+    return "success";
+  }
+
+  if (status === "failed") {
+    return "failed";
+  }
+
+  return null;
+}
+
+function mapExecutionsToSnapshots(
+  executions: NodeExecutionDetail[],
+): Record<string, NodeExecutionSnapshot> {
+  const nodeExecutions: Record<string, NodeExecutionSnapshot> = {};
+
+  for (const execution of executions) {
+    const runtimeStatus = mapExecutionStatusToRuntime(execution.status);
+
+    if (!runtimeStatus) {
+      continue;
+    }
+
+    nodeExecutions[execution.nodeId] = {
+      status: runtimeStatus,
+      output: execution.output,
+      error: execution.error,
+    };
+  }
+
+  return nodeExecutions;
+}
+
+function mapSnapshotsToInlineState(
+  snapshots: Record<string, NodeExecutionSnapshot>,
+): Record<string, NodeInlineExecutionState> {
+  return Object.fromEntries(
+    Object.entries(snapshots).map(([nodeId, snapshot]) => [
+      nodeId,
+      {
+        status: snapshot.status,
+        output: snapshot.output,
+        error: snapshot.error,
+      },
+    ]),
+  );
+}
+
+export async function getLatestWorkflowInlineExecutions(
+  workflowId: string,
+): Promise<Record<string, NodeInlineExecutionState>> {
+  const userId = await requireUserId();
+
+  const run = await db.workflowRun.findFirst({
+    where: {
+      workflowId,
+      userId,
+      status: { not: "running" },
+    },
+    orderBy: { startedAt: "desc" },
+    include: {
+      executions: {
+        orderBy: { startedAt: "asc" },
+      },
+    },
+  });
+
+  if (!run) {
+    return {};
+  }
+
+  const executions = run.executions.map(
+    (execution): NodeExecutionDetail => ({
+      id: execution.id,
+      nodeId: execution.nodeId,
+      nodeType: execution.nodeType,
+      nodeName: nodeDisplayName(execution.nodeType, execution.nodeId),
+      status: execution.status as NodeExecutionDetail["status"],
+      input: execution.input,
+      output: execution.output,
+      error: execution.error,
+      startedAt: execution.startedAt.toISOString(),
+      endedAt: execution.endedAt?.toISOString() ?? null,
+      durationMs: execution.durationMs,
+    }),
+  );
+
+  return mapSnapshotsToInlineState(mapExecutionsToSnapshots(executions));
 }
 
 export async function startWorkflowRun(
@@ -236,5 +335,6 @@ export async function getActiveRunState(
     status: detail.status,
     nodeStatuses,
     activeNodeIds,
+    nodeExecutions: mapExecutionsToSnapshots(detail.executions),
   };
 }

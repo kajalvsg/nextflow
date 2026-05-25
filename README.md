@@ -74,7 +74,7 @@ cp .env.example .env.local
 | `TRIGGER_SECRET_KEY` | Trigger.dev secret key |
 | `TRIGGER_PROJECT_REF` | Trigger.dev project ref |
 | `GEMINI_API_KEY` | Google Gemini API key (server-side only) |
-| `GEMINI_MODEL` | Model name, e.g. `gemini-2.5-flash` |
+| `GEMINI_MODEL` | Model name — `gemini-1.5-flash` (default) or `gemini-2.5-flash` |
 | `NEXT_PUBLIC_APP_URL` | App URL, e.g. `http://localhost:3000` |
 | `NEXT_PUBLIC_TRANSLOADIT_AUTH_KEY` | Transloadit auth key (public) |
 | `TRANSLOADIT_AUTH_SECRET` | Transloadit auth secret (server-side only) |

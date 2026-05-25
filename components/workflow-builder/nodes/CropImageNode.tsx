@@ -7,9 +7,11 @@ import type { CropImageConfig, WorkflowNodeData } from "@/types/workflow-canvas"
 import { useWorkflowBuilder } from "../WorkflowBuilderContext";
 import { NodeCardShell } from "./NodeCardShell";
 import { NodeHandle } from "./NodeHandle";
+import { NodeInlineOutputSection } from "./NodeInlineOutputSection";
 
 export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData>) {
-  const { updateNodeData, getNodeExecutionStatus } = useWorkflowBuilder();
+  const { updateNodeData, getNodeExecutionStatus, getNodeInlineExecution } =
+    useWorkflowBuilder();
   const config = data.config as CropImageConfig;
 
   const updateConfig = (patch: Partial<CropImageConfig>) => {
@@ -73,6 +75,12 @@ export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData
             }
           />
         </div>
+
+        <NodeInlineOutputSection
+          sectionLabel="Output Image"
+          nodeType="cropImage"
+          inlineExecution={getNodeInlineExecution(id)}
+        />
       </NodeCardShell>
     </div>
   );

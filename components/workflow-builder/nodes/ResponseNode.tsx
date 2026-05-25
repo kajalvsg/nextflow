@@ -6,9 +6,10 @@ import type { WorkflowNodeData } from "@/types/workflow-canvas";
 import { useWorkflowBuilder } from "../WorkflowBuilderContext";
 import { NodeCardShell } from "./NodeCardShell";
 import { NodeHandle } from "./NodeHandle";
+import { NodeInlineOutputSection } from "./NodeInlineOutputSection";
 
 export function ResponseNode({ id, data, selected }: NodeProps<WorkflowNodeData>) {
-  const { getNodeExecutionStatus } = useWorkflowBuilder();
+  const { getNodeExecutionStatus, getNodeInlineExecution } = useWorkflowBuilder();
 
   return (
     <div className="relative">
@@ -25,6 +26,12 @@ export function ResponseNode({ id, data, selected }: NodeProps<WorkflowNodeData>
           Connect a node output to the result handle to define the workflow
           response.
         </p>
+
+        <NodeInlineOutputSection
+          sectionLabel="Final Output"
+          nodeType="response"
+          inlineExecution={getNodeInlineExecution(id)}
+        />
       </NodeCardShell>
     </div>
   );

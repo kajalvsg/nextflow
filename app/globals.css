@@ -536,6 +536,11 @@ html.dark .cl-userButtonPopoverFooter svg {
   border-radius: var(--radius-card) !important;
   background: var(--surface) !important;
   box-shadow: var(--shadow-card);
+  margin-right: 0 !important;
+}
+
+.workflow-history-panel {
+  max-width: min(252px, 32vw);
 }
 
 .workflow-handle-row {
@@ -560,6 +565,25 @@ html.dark .cl-userButtonPopoverFooter svg {
 
 .workflow-canvas .react-flow__node .rounded-card {
   overflow: hidden;
+}
+
+/* Keep floating controls above expanded nodes (selected nodes can reach z-index 1000). */
+.workflow-canvas .react-flow__panel {
+  z-index: 1100;
+  pointer-events: none;
+}
+
+.workflow-canvas .react-flow__panel > * {
+  pointer-events: auto;
+}
+
+.workflow-node-picker-overlay {
+  z-index: 1100;
+  pointer-events: none;
+}
+
+.workflow-node-picker-overlay > * {
+  pointer-events: auto;
 }
 
 @keyframes workflow-node-pulse {

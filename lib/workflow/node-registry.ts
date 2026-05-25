@@ -24,12 +24,23 @@ export const NODE_PICKER_ITEMS: NodePickerItem[] = [
   },
 ];
 
+function createWorkflowNodeId(nodeType: WorkflowNodeType): string {
+  if (
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+  ) {
+    return `${nodeType}-${globalThis.crypto.randomUUID()}`;
+  }
+
+  return `${nodeType}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export function createWorkflowNode(
   nodeType: WorkflowNodeType,
   position: { x: number; y: number },
   id?: string,
 ): WorkflowCanvasNode {
-  const nodeId = id ?? `${nodeType}-${crypto.randomUUID()}`;
+  const nodeId = id ?? createWorkflowNodeId(nodeType);
 
   return {
     id: nodeId,

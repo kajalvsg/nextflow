@@ -11,6 +11,18 @@ export type NodeExecutionStatus =
 
 export type NodeRuntimeStatus = "idle" | "running" | "success" | "failed";
 
+export type NodeInlineExecutionState = {
+  status: NodeRuntimeStatus | "updating";
+  output: unknown;
+  error: string | null;
+};
+
+export type NodeExecutionSnapshot = {
+  status: NodeRuntimeStatus;
+  output: unknown;
+  error: string | null;
+};
+
 export type WorkflowRunSummary = {
   id: string;
   workflowId: string;
@@ -45,6 +57,7 @@ export type ActiveRunState = {
   status: RunStatus;
   nodeStatuses: Record<string, NodeRuntimeStatus>;
   activeNodeIds: string[];
+  nodeExecutions: Record<string, NodeExecutionSnapshot>;
 };
 
 export type StartRunInput = {
