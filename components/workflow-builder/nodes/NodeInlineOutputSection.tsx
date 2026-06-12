@@ -9,6 +9,7 @@ type NodeInlineOutputSectionProps = {
   sectionLabel: string;
   nodeType: "geminiPro" | "cropImage" | "response";
   inlineExecution: NodeInlineExecutionState | null;
+  compact?: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -195,6 +196,7 @@ export function NodeInlineOutputSection({
   sectionLabel,
   nodeType,
   inlineExecution,
+  compact = false,
 }: NodeInlineOutputSectionProps) {
   if (!inlineExecution) {
     return null;
@@ -206,11 +208,15 @@ export function NodeInlineOutputSection({
   return (
     <div
       className={cn(
-        "nodrag nopan nowheel border-t border-border-soft pt-3 stack-sm",
+        "nodrag nopan nowheel stack-sm",
+        !compact && "border-t border-border-soft pt-3",
+        compact && "mt-2",
         isPending && "opacity-80",
       )}
     >
-      <p className="text-label text-foreground">{sectionLabel}</p>
+      {sectionLabel ? (
+        <p className="text-label text-foreground">{sectionLabel}</p>
+      ) : null}
 
       {isPending ? (
         <div className="flex items-center gap-2 text-caption text-muted">

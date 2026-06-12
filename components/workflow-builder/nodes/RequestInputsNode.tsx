@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowDownToLine, ImagePlus, Loader2, X } from "lucide-react";
 import { type NodeProps } from "reactflow";
-import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import {
   getExecutableImageUrl,
@@ -163,32 +162,41 @@ export function RequestInputsNode({
       icon={ArrowDownToLine}
       selected={selected}
       executionStatus={getNodeExecutionStatus(id)}
-      rightGutter
-      handles={
-        <>
-          <NodeHandle id="text_field" type="source" top="38%" />
-          <NodeHandle id="image_field" type="source" top="72%" />
-        </>
-      }
     >
-      <div className="nodrag nopan nowheel">
-        <Textarea
-          label="text_field"
-          placeholder="Enter default text input..."
-          value={config.textField}
-          disabled={textFieldConnected}
-          onChange={(event) => handleTextChange(event.target.value)}
-          className="workflow-node-field min-h-[72px] text-body-sm"
-        />
-        {textFieldConnected ? (
-          <p className="text-caption text-muted">
-            Connected — manual input disabled.
-          </p>
-        ) : null}
+      <div className="workflow-node-field-row relative nodrag nopan nowheel">
+        <div className="workflow-handle-slot workflow-handle-slot-right">
+          <NodeHandle id="text_field" type="source" inline />
+        </div>
+
+        <div className="stack-sm">
+          <label className="workflow-node-label-row block text-[11px] font-medium leading-none text-foreground">
+            text_field
+          </label>
+          <textarea
+            placeholder="Enter default text input..."
+            value={config.textField}
+            disabled={textFieldConnected}
+            onChange={(event) => handleTextChange(event.target.value)}
+            onPointerDown={stopNodePointer}
+            className="workflow-node-field min-h-[72px] w-full resize-y rounded-button border border-border bg-surface-muted px-3 py-2 text-body-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+          />
+          {textFieldConnected ? (
+            <p className="text-caption text-muted">
+              Connected — manual input disabled.
+            </p>
+          ) : null}
+        </div>
       </div>
 
-      <div className="nodrag nopan nowheel stack-sm">
-        <p className="text-label text-foreground">image_field</p>
+      <div className="workflow-node-field-row relative nodrag nopan nowheel">
+        <div className="workflow-handle-slot workflow-handle-slot-right">
+          <NodeHandle id="image_field" type="source" inline />
+        </div>
+
+        <div className="stack-sm">
+          <p className="workflow-node-label-row text-[11px] font-medium leading-none text-foreground">
+            image_field
+          </p>
         <input
           ref={fileInputRef}
           type="file"
@@ -294,6 +302,7 @@ export function RequestInputsNode({
             Image preview unavailable for execution. Re-upload the image.
           </p>
         ) : null}
+        </div>
       </div>
     </NodeCardShell>
   );

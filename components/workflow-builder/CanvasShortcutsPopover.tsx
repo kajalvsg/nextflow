@@ -8,8 +8,10 @@ const SHORTCUTS = [
   { keys: "Ctrl + Y / Ctrl + Shift + Z", action: "Redo" },
   { keys: "Delete / Backspace", action: "Delete selected" },
   { keys: "Scroll", action: "Zoom canvas" },
-  { keys: "Space + drag", action: "Pan canvas" },
+  { keys: "Drag empty canvas", action: "Move entire workflow" },
   { keys: "Drag handle", action: "Connect nodes" },
+  { keys: "Shift + drag node", action: "Move connected group" },
+  { keys: "Drag connection line", action: "Move connected group" },
 ];
 
 type CanvasShortcutsPopoverProps = {

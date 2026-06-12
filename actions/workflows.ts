@@ -130,6 +130,7 @@ export async function createWorkflow(
     });
 
     revalidatePath("/dashboard");
+    revalidatePath(`/workflow/${workflow.id}`);
 
     return { success: true, data: toWorkflowDTO(serializeWorkflow(workflow)) };
   } catch (error) {

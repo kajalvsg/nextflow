@@ -41,6 +41,7 @@ export function useCreateWorkflowTask() {
         return;
       }
 
+      router.refresh();
       router.push(`/workflow/${result.data.id}`);
     } catch (cause) {
       if (requestIdRef.current !== requestId) {

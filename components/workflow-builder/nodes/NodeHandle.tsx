@@ -1,17 +1,36 @@
 "use client";
 
 import { Handle, Position, type HandleType } from "reactflow";
-import { getHandleColorClass } from "@/lib/workflow/edge-colors";
+import { getEdgeColorKind, getHandleColorClass } from "@/lib/workflow/edge-colors";
 import { cn } from "@/lib/utils/cn";
 
 type NodeHandleProps = {
   id: string;
   type: HandleType;
-  top: string;
+  /** @deprecated Use inline handles on field rows instead of percentage positioning. */
+  top?: string;
+  inline?: boolean;
 };
 
-export function NodeHandle({ id, type, top }: NodeHandleProps) {
+export function NodeHandle({ id, type, top, inline = false }: NodeHandleProps) {
   const isSource = type === "source";
+  const colorKind = getEdgeColorKind(id);
+
+  if (inline) {
+    return (
+      <Handle
+        id={id}
+        type={type}
+        position={isSource ? Position.Right : Position.Left}
+        aria-label={id}
+        data-handle-color={colorKind}
+        className={cn(
+          "workflow-handle-dot !relative !left-auto !right-auto !top-auto !translate-x-0 !translate-y-0",
+          getHandleColorClass(id),
+        )}
+      />
+    );
+  }
 
   return (
     <div
@@ -26,6 +45,7 @@ export function NodeHandle({ id, type, top }: NodeHandleProps) {
         type={type}
         position={isSource ? Position.Right : Position.Left}
         aria-label={id}
+        data-handle-color={colorKind}
         className={cn(
           "workflow-handle-dot pointer-events-auto !relative !left-auto !right-auto !top-auto !translate-x-0 !translate-y-0",
           getHandleColorClass(id),

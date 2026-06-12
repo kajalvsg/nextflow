@@ -10,6 +10,7 @@ import { isLocalDatabaseEnabled } from "@/lib/db/local-pglite";
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
   prismaMode: "local" | "remote" | undefined;
+  localPgliteInstance: PGlite | undefined;
 };
 
 function createRemotePrismaClient(): PrismaClient {
@@ -32,20 +33,39 @@ function createLocalPrismaClient(pglite: PGlite): PrismaClient {
   });
 }
 
+export function resetLocalPrismaClient(): void {
+  const existing = globalForPrisma.prisma;
+
+  if (existing && globalForPrisma.prismaMode === "local") {
+    void existing.$disconnect().catch(() => {
+      // Ignore disconnect errors during recovery.
+    });
+  }
+
+  globalForPrisma.prisma = undefined;
+  globalForPrisma.prismaMode = undefined;
+  globalForPrisma.localPgliteInstance = undefined;
+}
+
 export function initializeLocalPrisma(pglite: PGlite): PrismaClient {
   if (
     globalForPrisma.prisma &&
-    globalForPrisma.prismaMode === "local"
+    globalForPrisma.prismaMode === "local" &&
+    globalForPrisma.localPgliteInstance === pglite
   ) {
     return globalForPrisma.prisma;
   }
 
+  resetLocalPrismaClient();
+
   const client = createLocalPrismaClient(pglite);
   globalForPrisma.prisma = client;
   globalForPrisma.prismaMode = "local";
+  globalForPrisma.localPgliteInstance = pglite;
 
   if (process.env.NODE_ENV !== "production") {
     globalForPrisma.prisma = client;
+    globalForPrisma.localPgliteInstance = pglite;
   }
 
   return client;

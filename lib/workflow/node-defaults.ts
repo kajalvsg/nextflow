@@ -57,6 +57,8 @@ export function defaultGeminiProConfig(): GeminiProConfig {
     settingsOpen: false,
     temperature: 0.7,
     maxOutputTokens: 8192,
+    prompt: "",
+    systemPrompt: "",
   };
 }
 
@@ -86,7 +88,7 @@ export function defaultLabelForNodeType(nodeType: WorkflowNodeType): string {
     case "cropImage":
       return "Crop Image";
     case "geminiPro":
-      return "Gemini 3.1 Pro";
+      return "Gemini";
     case "response":
       return "Response";
   }

@@ -6,6 +6,10 @@ import {
 
 let localDbReady: Promise<void> | null = null;
 
+export function resetDbReadyState(): void {
+  localDbReady = null;
+}
+
 export async function ensureDbReady(): Promise<void> {
   if (!isLocalDatabaseEnabled()) {
     return;
@@ -19,7 +23,7 @@ export async function ensureDbReady(): Promise<void> {
   try {
     await localDbReady;
   } catch (error) {
-    localDbReady = null;
+    resetDbReadyState();
     throw error;
   }
 }

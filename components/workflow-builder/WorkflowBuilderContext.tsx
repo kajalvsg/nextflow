@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
+import type { StickyNoteNodeData } from "@/lib/workflow/sticky-notes-storage";
 import type { WorkflowNodeData } from "@/types/workflow-canvas";
 import type { NodeInlineExecutionState, NodeRuntimeStatus } from "@/types/workflow-execution";
 
@@ -10,12 +11,28 @@ type WorkflowBuilderContextValue = {
     nodeId: string,
     updater: (data: WorkflowNodeData) => WorkflowNodeData,
   ) => void;
+  updateStickyNote: (
+    nodeId: string,
+    updater: (data: StickyNoteNodeData) => StickyNoteNodeData,
+  ) => void;
+  deleteStickyNote: (nodeId: string) => void;
   isSourceHandleConnected: (nodeId: string, handleId: string) => boolean;
   isTargetHandleConnected: (nodeId: string, handleId: string) => boolean;
   getNodeExecutionStatus: (nodeId: string) => NodeRuntimeStatus;
   getNodeInlineExecution: (nodeId: string) => NodeInlineExecutionState | null;
   isWorkflowRunning: boolean;
   runNode: (nodeId: string) => void;
+  removeEdge: (edgeId: string) => void;
+  refreshNode: (nodeId: string) => void;
+  duplicateNode: (nodeId: string) => void;
+  duplicateNodeWithEdges: (nodeId: string) => void;
+  toggleNodeLock: (nodeId: string) => void;
+  deleteNode: (nodeId: string) => void;
+  autoConnectHandle: (nodeId: string, targetHandle: string) => void;
+  beginEdgeGroupDrag: (
+    sourceNodeId: string,
+    event: React.PointerEvent<SVGElement>,
+  ) => void;
 };
 
 const WorkflowBuilderContext =

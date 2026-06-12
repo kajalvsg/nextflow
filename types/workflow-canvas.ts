@@ -31,6 +31,8 @@ export type GeminiProConfig = {
   settingsOpen: boolean;
   temperature: number;
   maxOutputTokens: number;
+  prompt: string;
+  systemPrompt: string;
 };
 
 export type ResponseConfig = Record<string, never>;
@@ -38,6 +40,7 @@ export type ResponseConfig = Record<string, never>;
 export type WorkflowNodeData = {
   label: string;
   nodeType: WorkflowNodeType;
+  locked?: boolean;
   config:
     | RequestInputsConfig
     | CropImageConfig

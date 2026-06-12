@@ -30,7 +30,7 @@ export function createDefaultEdge(): WorkflowCanvasEdge {
     target: RESPONSE_NODE_ID,
     targetHandle: "result",
     type: "default",
-    animated: true,
+    animated: false,
     style: { stroke: "#8b7cf7", strokeWidth: 2 },
   };
 }
@@ -186,6 +186,11 @@ function parseGeminiProConfig(value: unknown): GeminiProConfig {
       typeof value.maxOutputTokens === "number"
         ? value.maxOutputTokens
         : defaults.maxOutputTokens,
+    prompt: typeof value.prompt === "string" ? value.prompt : defaults.prompt,
+    systemPrompt:
+      typeof value.systemPrompt === "string"
+        ? value.systemPrompt
+        : defaults.systemPrompt,
   };
 }
 

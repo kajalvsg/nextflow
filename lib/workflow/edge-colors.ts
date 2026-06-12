@@ -6,8 +6,6 @@
 const TEXT_HANDLES = new Set([
   "text_field",
   "prompt",
-  "system_prompt",
-  "response",
   "result",
 ]);
 
@@ -18,38 +16,51 @@ const IMAGE_HANDLES = new Set([
   "output_image",
 ]);
 
+const PINK_HANDLES = new Set(["system_prompt", "response"]);
+
 export const EDGE_COLORS = {
   text: "#f97316",
   image: "#3b82f6",
-  default: "#22c55e",
+  pink: "#f472b6",
 } as const;
+
+export type EdgeColorKind = keyof typeof EDGE_COLORS;
+
+export function getEdgeColorKind(
+  handleId: string | null | undefined,
+): EdgeColorKind {
+  if (!handleId) {
+    return "text";
+  }
+
+  if (IMAGE_HANDLES.has(handleId)) {
+    return "image";
+  }
+
+  if (PINK_HANDLES.has(handleId)) {
+    return "pink";
+  }
+
+  if (TEXT_HANDLES.has(handleId)) {
+    return "text";
+  }
+
+  return "text";
+}
 
 export function getEdgeStrokeColor(
   sourceHandle: string | null | undefined,
 ): string {
-  if (!sourceHandle) {
-    return EDGE_COLORS.default;
-  }
-
-  if (TEXT_HANDLES.has(sourceHandle)) {
-    return EDGE_COLORS.text;
-  }
-
-  if (IMAGE_HANDLES.has(sourceHandle)) {
-    return EDGE_COLORS.image;
-  }
-
-  return EDGE_COLORS.default;
+  return EDGE_COLORS[getEdgeColorKind(sourceHandle)];
 }
 
 export function getHandleColorClass(handleId: string): string {
-  if (TEXT_HANDLES.has(handleId)) {
-    return "workflow-handle-text";
+  switch (getEdgeColorKind(handleId)) {
+    case "image":
+      return "workflow-handle-image";
+    case "pink":
+      return "workflow-handle-pink";
+    default:
+      return "workflow-handle-text";
   }
-
-  if (IMAGE_HANDLES.has(handleId)) {
-    return "workflow-handle-image";
-  }
-
-  return "workflow-handle-default";
 }

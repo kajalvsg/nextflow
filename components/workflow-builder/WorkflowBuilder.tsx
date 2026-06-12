@@ -25,6 +25,11 @@ import {
   startWorkflowRun,
 } from "@/actions/workflow-execution";
 import { saveWorkflowGraph } from "@/actions/workflow-builder";
+import { autoArrangeWorkflowNodes } from "@/lib/workflow/auto-arrange";
+import {
+  getConnectedNodeIds,
+  resolveConnectedGroupDrag,
+} from "@/lib/workflow/connected-nodes";
 import { PROTECTED_NODE_IDS, sanitizeGraphForSave } from "@/lib/workflow/canvas";
 import { getEdgeStrokeColor } from "@/lib/workflow/edge-colors";
 import { prepareGraphPayload, serializeGraphPayload } from "@/lib/workflow/graph-payload";
@@ -47,8 +52,20 @@ import {
   undoHistory,
   type HistoryStack,
 } from "@/lib/workflow/history";
-import { createAddableNode } from "@/lib/workflow/node-registry";
+import { findAutoConnectSource } from "@/lib/workflow/auto-connect";
+import {
+  createAddableNode,
+  createWorkflowNodeId,
+} from "@/lib/workflow/node-registry";
 import { getWorkflowCanvasCenter } from "@/lib/workflow/viewport";
+import {
+  createStickyNoteNode,
+  isStickyNoteNodeId,
+  loadStickyNotes,
+  saveStickyNotes,
+  STICKY_NOTE_NODE_TYPE,
+  type StickyNoteNode as StickyNoteNodeModel,
+} from "@/lib/workflow/sticky-notes-storage";
 import type {
   AddableWorkflowNodeType,
   WorkflowBuilderDTO,
@@ -63,10 +80,13 @@ import { CropImageNode } from "./nodes/CropImageNode";
 import { GeminiProNode } from "./nodes/GeminiProNode";
 import { RequestInputsNode } from "./nodes/RequestInputsNode";
 import { ResponseNode } from "./nodes/ResponseNode";
+import { StickyNoteNode } from "./nodes/StickyNoteNode";
 import { NodePicker } from "./NodePicker";
 import { CanvasBottomToolbar } from "./CanvasBottomToolbar";
 import { CanvasControlsToolbar } from "./CanvasControlsToolbar";
 import { CanvasMinimapPanel } from "./CanvasMinimapPanel";
+import { WorkflowPaneDragHandler } from "./WorkflowPaneDragHandler";
+import { WorkflowEdge } from "./edges/WorkflowEdge";
 import { WorkflowBuilderProvider } from "./WorkflowBuilderContext";
 import { WorkflowBuilderTopBar } from "./WorkflowBuilderTopBar";
 import { WorkflowHistoryPanel } from "./WorkflowHistoryPanel";
@@ -77,11 +97,17 @@ const nodeTypes = {
   cropImage: CropImageNode,
   geminiPro: GeminiProNode,
   response: ResponseNode,
+  [STICKY_NOTE_NODE_TYPE]: StickyNoteNode,
+};
+
+const edgeTypes = {
+  default: WorkflowEdge,
 };
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 const TOAST_DURATION_MS = 3200;
+const SAVE_INDICATOR_HIDE_MS = 2000;
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 const RUN_POLL_INTERVAL_MS = 4000;
 const RUN_STATUS_RESET_MS = 3500;
@@ -216,6 +242,9 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       : workflow.id;
   const [nodes, setNodes] = useState<Node<WorkflowNodeData>[]>(workflow.nodes);
   const [edges, setEdges] = useState<Edge[]>(workflow.edges);
+  const [stickyNotes, setStickyNotes] = useState<StickyNoteNodeModel[]>(() =>
+    loadStickyNotes(workflow.id),
+  );
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
@@ -233,11 +262,14 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
   const [nodePickerOpen, setNodePickerOpen] = useState(false);
   const [showMinimap, setShowMinimap] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
-  const [panMode, setPanMode] = useState(false);
+  const [moveConnectedGroup, setMoveConnectedGroup] = useState(false);
+  const [isWorkflowCanvasDragging, setIsWorkflowCanvasDragging] = useState(false);
+  const moveConnectedGroupRef = useRef(false);
   const [canRunWorkflow, setCanRunWorkflow] = useState(true);
   const [isLeaving, setIsLeaving] = useState(false);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
   const nodesRef = useRef(nodes);
@@ -245,6 +277,13 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
   const historyRef = useRef<HistoryStack>(createHistoryStack(workflow.nodes, workflow.edges));
   const isHistoryActionRef = useRef(false);
   const isDraggingRef = useRef(false);
+  const dragGroupRef = useRef<{
+    anchor: { x: number; y: number };
+    nodeStarts: Map<string, { x: number; y: number }>;
+    nodeIds: Set<string>;
+    mode: "node" | "pointer" | "workflow";
+  } | null>(null);
+  const pointerDragCleanupRef = useRef<(() => void) | null>(null);
   const fieldEditHistoryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fieldEditHistoryPendingRef = useRef(false);
   const lastValidationRef = useRef<string | null>(null);
@@ -261,6 +300,29 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     nodesRef.current = nodes;
     edgesRef.current = edges;
   }, [nodes, edges]);
+
+  useEffect(() => {
+    moveConnectedGroupRef.current = moveConnectedGroup;
+  }, [moveConnectedGroup]);
+
+  useEffect(() => {
+    if (saveStatusTimerRef.current) {
+      clearTimeout(saveStatusTimerRef.current);
+      saveStatusTimerRef.current = null;
+    }
+
+    if (saveStatus === "saved" || saveStatus === "error") {
+      saveStatusTimerRef.current = setTimeout(() => {
+        setSaveStatus("idle");
+      }, SAVE_INDICATOR_HIDE_MS);
+    }
+
+    return () => {
+      if (saveStatusTimerRef.current) {
+        clearTimeout(saveStatusTimerRef.current);
+      }
+    };
+  }, [saveStatus]);
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
@@ -356,6 +418,8 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     if (workflowUnavailableRef.current) {
       return;
     }
+
+    setSaveStatus((current) => (current === "error" ? "error" : "saving"));
 
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
@@ -624,8 +688,59 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     historyTick >= 0 && historyRef.current.future.length > 0;
 
   const handleAddStickyNote = useCallback(() => {
-    showToast("Sticky notes are coming soon.");
-  }, [showToast]);
+    const position = getWorkflowCanvasCenter(reactFlow);
+    const note = createStickyNoteNode(position);
+
+    setStickyNotes((current) => {
+      const next = [...current, note];
+      saveStickyNotes(workflowId, next);
+      return next;
+    });
+  }, [reactFlow, workflowId]);
+
+  const updateStickyNote = useCallback(
+    (
+      nodeId: string,
+      updater: (data: StickyNoteNodeModel["data"]) => StickyNoteNodeModel["data"],
+    ) => {
+      setStickyNotes((current) => {
+        const next = current.map((note) =>
+          note.id === nodeId
+            ? { ...note, data: updater(note.data) }
+            : note,
+        );
+        saveStickyNotes(workflowId, next);
+        return next;
+      });
+    },
+    [workflowId],
+  );
+
+  const deleteStickyNote = useCallback(
+    (nodeId: string) => {
+      setStickyNotes((current) => {
+        const next = current.filter((note) => note.id !== nodeId);
+        saveStickyNotes(workflowId, next);
+        return next;
+      });
+    },
+    [workflowId],
+  );
+
+  const handleAutoArrange = useCallback(() => {
+    recordHistory();
+
+    setNodes((current) => {
+      const arranged = autoArrangeWorkflowNodes(current, edgesRef.current);
+      nodesRef.current = arranged;
+      scheduleSave();
+      return arranged;
+    });
+
+    window.setTimeout(() => {
+      reactFlow.fitView({ padding: 0.2, duration: 300 });
+    }, 50);
+  }, [recordHistory, reactFlow, scheduleSave]);
 
   const updateNodeData = useCallback(
     (
@@ -672,10 +787,21 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
         recordHistory();
       }
 
-      const filtered = changes.filter(
-        (change) =>
-          change.type !== "remove" || !PROTECTED_NODE_IDS.has(change.id),
-      );
+      const group = dragGroupRef.current;
+      const suppressNodePositions =
+        group?.mode === "workflow" ||
+        (group?.mode === "node" && group.nodeIds.size >= 2);
+
+      const filtered = changes
+        .filter(
+          (change) =>
+            change.type !== "remove" || !PROTECTED_NODE_IDS.has(change.id),
+        )
+        .filter(
+          (change) =>
+            !suppressNodePositions ||
+            (change.type !== "position" && change.type !== "dimensions"),
+        );
 
       setNodes((current) => {
         const next = applyNodeChanges(filtered, current);
@@ -690,17 +816,277 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     [recordHistory, scheduleSave],
   );
 
-  const onNodeDragStart = useCallback(() => {
-    if (!isDraggingRef.current) {
-      isDraggingRef.current = true;
-      recordHistory();
-    }
-  }, [recordHistory]);
+  const handleFlowNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      const workflowChanges: NodeChange[] = [];
+      const stickyChanges: NodeChange[] = [];
 
-  const onNodeDragStop = useCallback(() => {
+      for (const change of changes) {
+        if ("id" in change && isStickyNoteNodeId(change.id)) {
+          stickyChanges.push(change);
+        } else {
+          workflowChanges.push(change);
+        }
+      }
+
+      if (stickyChanges.length > 0) {
+        setStickyNotes((current) => {
+          const next = applyNodeChanges(stickyChanges, current);
+          saveStickyNotes(workflowId, next);
+          return next;
+        });
+      }
+
+      if (workflowChanges.length > 0) {
+        onNodesChange(workflowChanges);
+      }
+    },
+    [onNodesChange, workflowId],
+  );
+
+  const applyConnectedGroupDrag = useCallback(
+    (deltaX: number, deltaY: number) => {
+      const group = dragGroupRef.current;
+
+      if (!group) {
+        return;
+      }
+
+      const minGroupSize = group.mode === "workflow" ? 1 : 2;
+
+      if (group.nodeIds.size < minGroupSize) {
+        return;
+      }
+
+      setNodes((current) => {
+        const next = current.map((currentNode) => {
+          const start = group.nodeStarts.get(currentNode.id);
+
+          if (!start || currentNode.draggable === false) {
+            return currentNode;
+          }
+
+          return {
+            ...currentNode,
+            position: {
+              x: start.x + deltaX,
+              y: start.y + deltaY,
+            },
+          };
+        });
+        nodesRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
+
+  const endConnectedGroupDrag = useCallback(() => {
+    pointerDragCleanupRef.current?.();
+    pointerDragCleanupRef.current = null;
+    dragGroupRef.current = null;
     isDraggingRef.current = false;
+    setIsWorkflowCanvasDragging(false);
     scheduleSave();
   }, [scheduleSave]);
+
+  const attachPointerGroupDragListeners = useCallback(() => {
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const current = reactFlow.screenToFlowPosition({
+        x: moveEvent.clientX,
+        y: moveEvent.clientY,
+      });
+      const group = dragGroupRef.current;
+
+      if (
+        !group ||
+        (group.mode !== "pointer" && group.mode !== "workflow")
+      ) {
+        return;
+      }
+
+      applyConnectedGroupDrag(
+        current.x - group.anchor.x,
+        current.y - group.anchor.y,
+      );
+    };
+
+    const onPointerEnd = () => {
+      endConnectedGroupDrag();
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerEnd);
+    window.addEventListener("pointercancel", onPointerEnd);
+
+    pointerDragCleanupRef.current = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerEnd);
+      window.removeEventListener("pointercancel", onPointerEnd);
+    };
+  }, [applyConnectedGroupDrag, endConnectedGroupDrag, reactFlow]);
+
+  const beginEdgeGroupDrag = useCallback(
+    (sourceNodeId: string, event: React.PointerEvent<SVGElement>) => {
+      if (isStickyNoteNodeId(sourceNodeId)) {
+        return;
+      }
+
+      const groupIds = getConnectedNodeIds(sourceNodeId, edgesRef.current);
+
+      if (groupIds.size < 2) {
+        return;
+      }
+
+      if (!isDraggingRef.current) {
+        isDraggingRef.current = true;
+        recordHistory();
+      }
+
+      const nodeStarts = new Map<string, { x: number; y: number }>();
+
+      for (const currentNode of nodesRef.current) {
+        if (groupIds.has(currentNode.id)) {
+          nodeStarts.set(currentNode.id, { ...currentNode.position });
+        }
+      }
+
+      const anchor = reactFlow.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      dragGroupRef.current = {
+        anchor,
+        nodeStarts,
+        nodeIds: groupIds,
+        mode: "pointer",
+      };
+
+      attachPointerGroupDragListeners();
+      event.preventDefault();
+    },
+    [attachPointerGroupDragListeners, reactFlow, recordHistory],
+  );
+
+  const beginWorkflowDrag = useCallback(
+    (event: PointerEvent) => {
+      pointerDragCleanupRef.current?.();
+      pointerDragCleanupRef.current = null;
+
+      const workflowNodeIds = new Set(
+        nodesRef.current
+          .filter((node) => !isStickyNoteNodeId(node.id))
+          .map((node) => node.id),
+      );
+
+      if (workflowNodeIds.size === 0) {
+        return;
+      }
+
+      if (!isDraggingRef.current) {
+        isDraggingRef.current = true;
+        recordHistory();
+      }
+
+      const nodeStarts = new Map<string, { x: number; y: number }>();
+
+      for (const currentNode of nodesRef.current) {
+        if (workflowNodeIds.has(currentNode.id)) {
+          nodeStarts.set(currentNode.id, { ...currentNode.position });
+        }
+      }
+
+      dragGroupRef.current = {
+        anchor: reactFlow.screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        }),
+        nodeStarts,
+        nodeIds: workflowNodeIds,
+        mode: "workflow",
+      };
+
+      setIsWorkflowCanvasDragging(true);
+      attachPointerGroupDragListeners();
+      event.preventDefault();
+    },
+    [attachPointerGroupDragListeners, reactFlow, recordHistory],
+  );
+
+  const onNodeDragStart = useCallback(
+    (event: React.MouseEvent, node: Node<WorkflowNodeData>) => {
+      pointerDragCleanupRef.current?.();
+      pointerDragCleanupRef.current = null;
+
+      if (isStickyNoteNodeId(node.id)) {
+        dragGroupRef.current = null;
+      } else {
+        const groupIds = resolveConnectedGroupDrag(node.id, edgesRef.current, {
+          moveConnectedGroup: moveConnectedGroupRef.current,
+          shiftKey: event.shiftKey,
+        });
+
+        if (groupIds) {
+          const nodeStarts = new Map<string, { x: number; y: number }>();
+
+          for (const currentNode of nodesRef.current) {
+            if (groupIds.has(currentNode.id)) {
+              nodeStarts.set(currentNode.id, { ...currentNode.position });
+            }
+          }
+
+          dragGroupRef.current = {
+            anchor: reactFlow.screenToFlowPosition({
+              x: event.clientX,
+              y: event.clientY,
+            }),
+            nodeStarts,
+            nodeIds: groupIds,
+            mode: "node",
+          };
+        } else {
+          dragGroupRef.current = null;
+        }
+      }
+
+      if (!isDraggingRef.current) {
+        isDraggingRef.current = true;
+        recordHistory();
+      }
+    },
+    [reactFlow, recordHistory],
+  );
+
+  const onNodeDrag = useCallback(
+    (event: React.MouseEvent, node: Node<WorkflowNodeData>) => {
+      const group = dragGroupRef.current;
+
+      if (
+        !group ||
+        group.mode !== "node" ||
+        !group.nodeIds.has(node.id) ||
+        group.nodeIds.size < 2
+      ) {
+        return;
+      }
+
+      const pointer = reactFlow.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      applyConnectedGroupDrag(
+        pointer.x - group.anchor.x,
+        pointer.y - group.anchor.y,
+      );
+    },
+    [applyConnectedGroupDrag, reactFlow],
+  );
+
+  const onNodeDragStop = useCallback(() => {
+    endConnectedGroupDrag();
+  }, [endConnectedGroupDrag]);
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
@@ -759,6 +1145,13 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       });
     },
     [recordHistory, scheduleSave],
+  );
+
+  const removeEdge = useCallback(
+    (edgeId: string) => {
+      removeEdges(new Set([edgeId]));
+    },
+    [removeEdges],
   );
 
   const onEdgeDoubleClick = useCallback(
@@ -840,7 +1233,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
         const next = addEdge(
           {
             ...connection,
-            animated: true,
+            animated: false,
             style: {
               stroke: getEdgeStrokeColor(connection.sourceHandle),
               strokeWidth: 2,
@@ -926,13 +1319,206 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
   const defaultEdgeOptions = useMemo(
     () => ({
-      animated: true,
+      animated: false,
       selectable: true,
       focusable: true,
       interactionWidth: 24,
       style: { stroke: "#8b7cf7", strokeWidth: 2 },
     }),
     [],
+  );
+
+  const refreshNode = useCallback((nodeId: string) => {
+    setNodeStatuses((current) => {
+      if (!(nodeId in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[nodeId];
+      return next;
+    });
+
+    setNodeInlineExecutions((current) => {
+      if (!(nodeId in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[nodeId];
+      return next;
+    });
+  }, []);
+
+  const duplicateNode = useCallback(
+    (nodeId: string) => {
+      const source = nodesRef.current.find((node) => node.id === nodeId);
+
+      if (!source || PROTECTED_NODE_IDS.has(nodeId)) {
+        return;
+      }
+
+      recordHistory();
+
+      const cloned: Node<WorkflowNodeData> = {
+        ...structuredClone(source),
+        id: createWorkflowNodeId(source.data.nodeType),
+        position: {
+          x: source.position.x + 48,
+          y: source.position.y + 48,
+        },
+        selected: true,
+        data: {
+          ...structuredClone(source.data),
+          label: `${source.data.label} copy`,
+        },
+      };
+
+      setNodes((current) => {
+        const next = [
+          ...current.map((node) => ({ ...node, selected: false })),
+          cloned,
+        ];
+        nodesRef.current = next;
+        scheduleSave();
+        return next;
+      });
+    },
+    [recordHistory, scheduleSave],
+  );
+
+  const duplicateNodeWithEdges = useCallback(
+    (nodeId: string) => {
+      const source = nodesRef.current.find((node) => node.id === nodeId);
+
+      if (!source || PROTECTED_NODE_IDS.has(nodeId)) {
+        return;
+      }
+
+      recordHistory();
+
+      const newId = createWorkflowNodeId(source.data.nodeType);
+      const cloned: Node<WorkflowNodeData> = {
+        ...structuredClone(source),
+        id: newId,
+        position: {
+          x: source.position.x + 48,
+          y: source.position.y + 48,
+        },
+        selected: true,
+        data: {
+          ...structuredClone(source.data),
+          label: `${source.data.label} copy`,
+        },
+      };
+
+      const relatedEdges = edgesRef.current.filter(
+        (edge) => edge.source === nodeId || edge.target === nodeId,
+      );
+
+      const clonedEdges = relatedEdges.map((edge) => ({
+        ...structuredClone(edge),
+        id: `edge-${newId}-${edge.sourceHandle ?? "out"}-${edge.targetHandle ?? "in"}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        source: edge.source === nodeId ? newId : edge.source,
+        target: edge.target === nodeId ? newId : edge.target,
+        animated: false,
+      }));
+
+      setNodes((current) => {
+        const next = [
+          ...current.map((node) => ({ ...node, selected: false })),
+          cloned,
+        ];
+        nodesRef.current = next;
+        return next;
+      });
+
+      setEdges((current) => {
+        const next = [...current, ...clonedEdges];
+        edgesRef.current = next;
+        scheduleSave();
+        return next;
+      });
+    },
+    [recordHistory, scheduleSave],
+  );
+
+  const toggleNodeLock = useCallback(
+    (nodeId: string) => {
+      if (PROTECTED_NODE_IDS.has(nodeId)) {
+        return;
+      }
+
+      recordHistory();
+
+      setNodes((current) => {
+        const next = current.map((node) => {
+          if (node.id !== nodeId) {
+            return node;
+          }
+
+          const locked = !node.data.locked;
+
+          return {
+            ...node,
+            draggable: !locked,
+            data: {
+              ...node.data,
+              locked,
+            },
+          };
+        });
+        nodesRef.current = next;
+        scheduleSave();
+        return next;
+      });
+    },
+    [recordHistory, scheduleSave],
+  );
+
+  const deleteNode = useCallback(
+    (nodeId: string) => {
+      if (PROTECTED_NODE_IDS.has(nodeId)) {
+        return;
+      }
+
+      recordHistory();
+
+      setNodes((current) => {
+        const next = current.filter((node) => node.id !== nodeId);
+        nodesRef.current = next;
+        return next;
+      });
+
+      setEdges((current) => {
+        const next = current.filter(
+          (edge) => edge.source !== nodeId && edge.target !== nodeId,
+        );
+        edgesRef.current = next;
+        scheduleSave();
+        return next;
+      });
+    },
+    [recordHistory, scheduleSave],
+  );
+
+  const autoConnectHandle = useCallback(
+    (nodeId: string, targetHandle: string) => {
+      const connection = findAutoConnectSource(
+        nodeId,
+        targetHandle,
+        nodesRef.current,
+        edgesRef.current,
+      );
+
+      if (!connection) {
+        showToast("No compatible source found to connect.");
+        return;
+      }
+
+      onConnect(connection);
+    },
+    [onConnect, showToast],
   );
 
   const isSourceConnected = useCallback(
@@ -1218,6 +1804,11 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     [activeNodeIds],
   );
 
+  const displayNodes = useMemo(
+    () => [...nodes, ...stickyNotes],
+    [nodes, stickyNotes],
+  );
+
   const displayEdges = useMemo(
     () =>
       edges.map((edge) => {
@@ -1230,7 +1821,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
         return {
           ...edge,
-          animated: isWorkflowRunning ? touchesRunning : (edge.animated ?? true),
+          animated: isWorkflowRunning ? touchesRunning : false,
           className: touchesRunning ? "workflow-edge-running" : edge.className,
           style: {
             ...edge.style,
@@ -1246,22 +1837,42 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     () => ({
       workflowId: workflow.id,
       updateNodeData,
+      updateStickyNote,
+      deleteStickyNote,
       isSourceHandleConnected: isSourceConnected,
       isTargetHandleConnected: isTargetConnected,
       getNodeExecutionStatus,
       getNodeInlineExecution,
       isWorkflowRunning,
       runNode,
+      removeEdge,
+      refreshNode,
+      duplicateNode,
+      duplicateNodeWithEdges,
+      toggleNodeLock,
+      deleteNode,
+      autoConnectHandle,
+      beginEdgeGroupDrag,
     }),
     [
       workflow.id,
       updateNodeData,
+      updateStickyNote,
+      deleteStickyNote,
       isSourceConnected,
       isTargetConnected,
       getNodeExecutionStatus,
       getNodeInlineExecution,
       isWorkflowRunning,
       runNode,
+      removeEdge,
+      refreshNode,
+      duplicateNode,
+      duplicateNodeWithEdges,
+      toggleNodeLock,
+      deleteNode,
+      autoConnectHandle,
+      beginEdgeGroupDrag,
     ],
   );
 
@@ -1277,7 +1888,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
         />
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <div
-          className={`workflow-canvas workflow-canvas-surface relative min-h-0 min-w-0 flex-1${panMode ? " workflow-canvas-pan-mode" : ""}`}
+          className={`workflow-canvas workflow-canvas-surface relative min-h-0 min-w-0 flex-1${isWorkflowCanvasDragging ? " workflow-canvas-dragging" : ""}`}
         >
             <WorkflowBuilderTopBar
               workflowName={workflow.name}
@@ -1296,9 +1907,9 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
             <WorkflowToast message={toastMessage} />
             <div className="absolute inset-0">
           <ReactFlow
-            nodes={nodes}
+            nodes={displayNodes}
             edges={displayEdges}
-            onNodesChange={onNodesChange}
+            onNodesChange={handleFlowNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onConnectStart={onConnectStart}
@@ -1308,27 +1919,30 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
             onEdgeDoubleClick={onEdgeDoubleClick}
             onPaneClick={onPaneClick}
             onNodeDragStart={onNodeDragStart}
+            onNodeDrag={onNodeDrag}
             onNodeDragStop={onNodeDragStop}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             defaultEdgeOptions={defaultEdgeOptions}
             elementsSelectable
             deleteKeyCode={["Backspace", "Delete"]}
             minZoom={0.2}
             maxZoom={2}
             proOptions={{ hideAttribution: true }}
-            panOnDrag={panMode}
-            panOnScroll
-            selectionOnDrag={!panMode}
+            panOnDrag={false}
+            panOnScroll={false}
+            zoomOnScroll
+            selectionOnDrag={false}
             className="h-full w-full bg-transparent"
           >
+            <WorkflowPaneDragHandler onBeginWorkflowDrag={beginWorkflowDrag} />
             <CanvasInitializer />
             {showGrid ? (
               <Background
                 variant={BackgroundVariant.Dots}
                 gap={20}
-                size={2}
-                offset={1}
-                color="#b8b8c0"
+                size={1.5}
+                color="var(--canvas-dot)"
               />
             ) : null}
             <Panel position="bottom-left" className="!m-4">
@@ -1337,10 +1951,11 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
                 onRedo={redo}
                 canUndo={canUndo}
                 canRedo={canRedo}
-                panMode={panMode}
-                onPanModeChange={setPanMode}
+                moveConnectedGroup={moveConnectedGroup}
+                onMoveConnectedGroupChange={setMoveConnectedGroup}
                 showGrid={showGrid}
                 onShowGridChange={setShowGrid}
+                onAutoArrange={handleAutoArrange}
               />
             </Panel>
             <Panel position="bottom-center" className="!mb-4">
@@ -1349,7 +1964,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
                 onAddStickyNote={handleAddStickyNote}
               />
             </Panel>
-            <Panel position="bottom-right" className="!m-4">
+            <Panel position="bottom-right" className="!mb-5 !mr-1">
               <CanvasMinimapPanel
                 visible={showMinimap}
                 onToggle={() => setShowMinimap((current) => !current)}

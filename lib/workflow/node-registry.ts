@@ -18,13 +18,13 @@ export const NODE_PICKER_ITEMS: NodePickerItem[] = [
   },
   {
     type: "geminiPro",
-    label: "Gemini 3.1 Pro",
-    description: "Generate responses with Gemini 3.1 Pro vision model.",
+    label: "Gemini",
+    description: "Generate responses with Gemini vision model.",
     keywords: ["gemini", "ai", "llm", "vision", "pro"],
   },
 ];
 
-function createWorkflowNodeId(nodeType: WorkflowNodeType): string {
+export function createWorkflowNodeId(nodeType: WorkflowNodeType): string {
   if (
     typeof globalThis.crypto !== "undefined" &&
     typeof globalThis.crypto.randomUUID === "function"

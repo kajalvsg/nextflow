@@ -2,7 +2,7 @@
 
 import { MiniMap } from "reactflow";
 import { Map } from "lucide-react";
-import { CanvasToolbarButton } from "./CanvasToolbarButton";
+import { cn } from "@/lib/utils/cn";
 
 type CanvasMinimapPanelProps = {
   visible: boolean;
@@ -14,7 +14,7 @@ export function CanvasMinimapPanel({
   onToggle,
 }: CanvasMinimapPanelProps) {
   return (
-    <div className="nodrag nopan nowheel pointer-events-auto flex flex-col items-end gap-2">
+    <div className="workflow-minimap-panel nodrag nopan nowheel pointer-events-auto flex flex-col items-end">
       {visible ? (
         <div className="relative">
           <MiniMap
@@ -24,23 +24,35 @@ export function CanvasMinimapPanel({
             pannable
             zoomable
           />
-          <div className="absolute -left-2 -top-2">
-            <div className="canvas-toolbar canvas-toolbar-compact">
-              <CanvasToolbarButton
-                label="Hide minimap"
-                onClick={onToggle}
-              >
-                <Map className="h-3.5 w-3.5" />
-              </CanvasToolbarButton>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={onToggle}
+            title="Hide minimap"
+            aria-label="Hide minimap"
+            className={cn(
+              "canvas-minimap-toggle absolute -right-1.5 -top-1.5",
+              "flex h-6 w-6 items-center justify-center rounded-full",
+              "border border-border bg-surface text-muted shadow-card",
+              "transition-colors hover:bg-surface-hover hover:text-foreground",
+            )}
+          >
+            <Map className="h-3 w-3" />
+          </button>
         </div>
       ) : (
-        <div className="canvas-toolbar canvas-toolbar-compact">
-          <CanvasToolbarButton label="Show minimap" onClick={onToggle}>
-            <Map className="h-4 w-4" />
-          </CanvasToolbarButton>
-        </div>
+        <button
+          type="button"
+          onClick={onToggle}
+          title="Show minimap"
+          aria-label="Show minimap"
+          className={cn(
+            "canvas-minimap-toggle flex h-8 w-8 items-center justify-center rounded-lg",
+            "border border-border bg-surface text-muted shadow-card",
+            "transition-colors hover:bg-surface-hover hover:text-foreground",
+          )}
+        >
+          <Map className="h-3.5 w-3.5" />
+        </button>
       )}
     </div>
   );

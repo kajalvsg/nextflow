@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
 import { getWorkflowForBuilder } from "@/actions/workflow-builder";
+import { isWorkflowBuilderLoadError } from "@/lib/workflow/builder-load-error";
 import { WorkflowBuilder } from "@/components/workflow-builder/WorkflowBuilder";
+import { WorkflowLoadError } from "@/components/workflow-builder/WorkflowLoadError";
 
 export const metadata: Metadata = {
   title: "Workflow",
@@ -25,11 +27,23 @@ export default async function WorkflowPage({ params }: WorkflowPageProps) {
     redirect("/dashboard");
   }
 
-  const workflow = await getWorkflowForBuilder(id);
+  try {
+    const workflow = await getWorkflowForBuilder(id);
 
-  if (!workflow) {
-    notFound();
+    if (!workflow) {
+      notFound();
+    }
+
+    return <WorkflowBuilder workflow={workflow} />;
+  } catch (error) {
+    if (isWorkflowBuilderLoadError(error)) {
+      if (error.code === "UNAUTHORIZED") {
+        redirect("/sign-in");
+      }
+
+      return <WorkflowLoadError message={error.message} />;
+    }
+
+    throw error;
   }
-
-  return <WorkflowBuilder workflow={workflow} />;
 }

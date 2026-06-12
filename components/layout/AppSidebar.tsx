@@ -7,6 +7,10 @@ import {
   BookOpen,
   Boxes,
   GitBranch,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Gift,
   Loader2,
   Plus,
   Search,
@@ -19,6 +23,7 @@ import { siteConfig } from "@/config/site";
 import { CLERK_AUTH_PATHS } from "@/lib/clerk/config";
 import { cn } from "@/lib/utils/cn";
 import { useAppSidebarActions } from "./AppSidebarActionsContext";
+import { useSidebarLayout } from "./SidebarLayoutContext";
 
 type NavItem = {
   id: string;
@@ -29,8 +34,8 @@ type NavItem = {
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { id: "new-task", label: "New Task", href: "#", icon: Plus, action: "new-task" },
-  { id: "search", label: "Search Tasks", href: CLERK_AUTH_PATHS.afterAuth, icon: Search },
+  { id: "new-task", label: "New task", href: "#", icon: Plus, action: "new-task" },
+  { id: "search", label: "Search tasks", href: CLERK_AUTH_PATHS.afterAuth, icon: Search },
   { id: "tasks", label: "Tasks", href: CLERK_AUTH_PATHS.afterAuth, icon: ListTodo },
   { id: "projects", label: "Projects", href: CLERK_AUTH_PATHS.afterAuth, icon: FolderKanban },
   { id: "library", label: "Library", href: CLERK_AUTH_PATHS.afterAuth, icon: BookOpen },
@@ -51,48 +56,135 @@ function getActiveNavId(pathname: string): string {
   return "tasks";
 }
 
+function SidebarNavButton({
+  label,
+  collapsed,
+  className,
+  children,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  label: string;
+  collapsed: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      title={collapsed ? label : undefined}
+      aria-label={label}
+      className={cn("app-sidebar-nav-item w-full", className)}
+      {...props}
+    >
+      {children}
+      {!collapsed ? <span className="truncate">{label}</span> : null}
+    </button>
+  );
+}
+
+function SidebarNavLink({
+  label,
+  collapsed,
+  className,
+  children,
+  ...props
+}: React.ComponentProps<typeof Link> & {
+  label: string;
+  collapsed: boolean;
+}) {
+  return (
+    <Link
+      title={collapsed ? label : undefined}
+      aria-label={label}
+      className={cn("app-sidebar-nav-item", className)}
+      {...props}
+    >
+      {children}
+      {!collapsed ? <span className="truncate">{label}</span> : null}
+    </Link>
+  );
+}
+
 export function AppSidebar() {
   const pathname = usePathname();
   const { user } = useUser();
   const { onNewTask, isNewTaskPending } = useAppSidebarActions();
+  const { collapsed, toggleCollapsed } = useSidebarLayout();
   const activeId = getActiveNavId(pathname);
 
   const displayName =
     user?.fullName ?? user?.firstName ?? user?.username ?? "User";
+  const email =
+    user?.primaryEmailAddress?.emailAddress ?? "Signed in";
   const initial = displayName.charAt(0).toUpperCase();
 
   return (
-    <aside className="app-sidebar flex h-full w-[280px] shrink-0 flex-col border-r border-border-soft bg-surface">
-      <div className="px-5 pb-4 pt-5">
+    <aside
+      className={cn(
+        "app-sidebar relative flex h-full shrink-0 flex-col border-r border-border-soft bg-surface transition-[width] duration-200 ease-out",
+        collapsed ? "app-sidebar-collapsed w-[72px]" : "w-[260px]",
+      )}
+    >
+      <div
+        className={cn(
+          "flex items-center justify-between gap-2",
+          collapsed ? "px-3 pb-3 pt-4" : "px-4 pb-3 pt-4",
+        )}
+      >
         <Link
           href={CLERK_AUTH_PATHS.afterAuth}
-          className="text-[1.35rem] font-bold tracking-tight text-foreground"
+          className={cn(
+            "app-sidebar-logo min-w-0 truncate text-foreground",
+            collapsed ? "mx-auto text-center text-sm" : undefined,
+          )}
+          title={siteConfig.name}
         >
-          {siteConfig.name}
+          {collapsed ? siteConfig.name.charAt(0) : siteConfig.name}
         </Link>
+
+        {!collapsed ? (
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className="app-sidebar-collapse-btn flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className="app-sidebar-collapse-btn absolute right-2 top-4 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+            aria-label="Expand sidebar"
+            title="Expand sidebar"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3">
-        <ul className="stack-sm">
+      <nav className="shrink-0 px-3">
+        <ul className="app-sidebar-nav-list">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
+
             if (item.action === "new-task") {
               return (
                 <li key={item.id}>
-                  <button
-                    type="button"
+                  <SidebarNavButton
+                    label={isNewTaskPending ? "Creating..." : item.label}
+                    collapsed={collapsed}
                     onClick={onNewTask}
                     disabled={isNewTaskPending}
-                    className="app-sidebar-nav-item w-full disabled:cursor-not-allowed disabled:opacity-60"
+                    className="disabled:cursor-not-allowed disabled:opacity-60"
                     aria-busy={isNewTaskPending}
                   >
                     {isNewTaskPending ? (
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                      <Loader2 className="app-sidebar-nav-icon animate-spin" />
                     ) : (
-                      <Icon className="h-4 w-4 shrink-0" />
+                      <Icon className="app-sidebar-nav-icon" />
                     )}
-                    <span>{isNewTaskPending ? "Creating..." : item.label}</span>
-                  </button>
+                  </SidebarNavButton>
                 </li>
               );
             }
@@ -101,67 +193,92 @@ export function AppSidebar() {
 
             return (
               <li key={item.id}>
-                <Link
+                <SidebarNavLink
                   href={item.href}
-                  className={cn(
-                    "app-sidebar-nav-item",
-                    isActive && "app-sidebar-nav-item-active",
-                  )}
+                  label={item.label}
+                  collapsed={collapsed}
+                  className={cn(isActive && "app-sidebar-nav-item-active")}
                 >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span>{item.label}</span>
-                </Link>
+                  <Icon className="app-sidebar-nav-icon" />
+                </SidebarNavLink>
               </li>
             );
           })}
         </ul>
-
-        {pathname.startsWith(CLERK_AUTH_PATHS.afterAuth) &&
-        !pathname.startsWith("/workflow") ? (
-          <p className="mt-8 px-3 text-body-sm text-muted-foreground">
-            Use New Task to create a workflow
-          </p>
-        ) : null}
       </nav>
 
-      <div className="border-t border-border-soft px-3 py-4">
+      <div className="flex min-h-0 flex-1 flex-col">
+        {!collapsed ? (
+          <div className="flex flex-1 items-center justify-center px-4">
+            <p className="app-sidebar-empty-state">No tasks yet</p>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="app-sidebar-footer">
         <button
           type="button"
-          className="app-sidebar-nav-item mb-3 w-full"
+          className={cn(
+            "app-sidebar-settings-btn",
+            collapsed && "app-sidebar-settings-btn-collapsed",
+          )}
           aria-label="Settings"
+          title={collapsed ? "Settings" : undefined}
         >
-          <Settings className="h-4 w-4 shrink-0" />
-          <span>Settings</span>
+          <Settings className="app-sidebar-footer-btn-icon shrink-0" />
+          {!collapsed ? <span className="truncate">Settings</span> : null}
         </button>
 
-        <button
-          type="button"
-          className="mb-3 flex w-full items-center justify-center rounded-xl bg-accent px-4 py-2.5 text-body-sm font-semibold text-accent-foreground transition-colors hover:bg-accent-hover"
-        >
-          Claim Offer
-        </button>
+        {!collapsed ? (
+          <button type="button" className="app-sidebar-claim-btn">
+            <Gift className="app-sidebar-footer-btn-icon shrink-0" />
+            <span className="truncate">Claim Offer</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="app-sidebar-claim-btn app-sidebar-claim-btn-collapsed"
+            aria-label="Claim Offer"
+            title="Claim Offer"
+          >
+            <Gift className="app-sidebar-footer-btn-icon shrink-0" />
+          </button>
+        )}
 
-        <div className="flex items-center gap-3 rounded-card px-3 py-2">
+        {!collapsed ? (
+          <div className="app-sidebar-footer-chevron" aria-hidden="true">
+            <ChevronDown className="h-3.5 w-3.5" />
+          </div>
+        ) : null}
+
+        <div
+          className={cn(
+            "app-sidebar-profile",
+            collapsed && "app-sidebar-profile-collapsed",
+          )}
+        >
           {user?.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={user.imageUrl}
               alt={displayName}
-              className="h-9 w-9 shrink-0 rounded-full object-cover ring-2 ring-accent/20"
+              className="app-sidebar-profile-avatar"
+              title={collapsed ? displayName : undefined}
             />
           ) : (
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">
+            <div
+              className="app-sidebar-profile-avatar app-sidebar-profile-avatar-fallback"
+              title={collapsed ? displayName : undefined}
+            >
               {initial}
             </div>
           )}
-          <div className="min-w-0">
-            <p className="truncate text-body-sm font-medium text-foreground">
-              {displayName}
-            </p>
-            <p className="truncate text-caption text-muted-foreground">
-              {user?.primaryEmailAddress?.emailAddress ?? "Signed in"}
-            </p>
-          </div>
+          {!collapsed ? (
+            <div className="min-w-0 flex-1">
+              <p className="app-sidebar-profile-name truncate">{displayName}</p>
+              <p className="app-sidebar-profile-email truncate">{email}</p>
+            </div>
+          ) : null}
         </div>
       </div>
     </aside>

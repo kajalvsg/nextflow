@@ -4,6 +4,8 @@ import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db, ensureDbReady } from "@/lib/db";
+import { getDbErrorMessage } from "@/lib/db/retry";
+import { WorkflowBuilderLoadError } from "@/lib/workflow/builder-load-error";
 import {
   createDefaultGraph,
   isGraphEmpty,
@@ -112,11 +114,11 @@ export async function getWorkflowForBuilder(
     };
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
-      return null;
+      throw new WorkflowBuilderLoadError("Unauthorized", "UNAUTHORIZED");
     }
 
     console.error("[getWorkflowForBuilder]", error);
-    return null;
+    throw new WorkflowBuilderLoadError(getDbErrorMessage(error), "DB_ERROR");
   }
 }
 

@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, History, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
 import {
   getWorkflowRunDetail,
   getWorkflowRunHistory,
 } from "@/actions/workflow-execution";
-import { Badge } from "@/components/ui/Badge";
 import type {
   WorkflowRunDetail,
   WorkflowRunSummary,
 } from "@/types/workflow-execution";
+import { cn } from "@/lib/utils/cn";
 
 type WorkflowHistoryPanelProps = {
   workflowId: string;
@@ -18,19 +18,26 @@ type WorkflowHistoryPanelProps = {
   onClose?: () => void;
 };
 
-function runBadgeVariant(status: string) {
-  switch (status) {
-    case "success":
-      return "completed" as const;
-    case "failed":
-      return "failed" as const;
-    case "running":
-    case "partial":
-      return "running" as const;
-    default:
-      return "default" as const;
-  }
-}
+type HistoryTab = "ui" | "api";
+
+type HistoryFilter =
+  | "all"
+  | "queued"
+  | "running"
+  | "waiting"
+  | "completed"
+  | "failed"
+  | "canceled";
+
+const FILTER_OPTIONS: { value: HistoryFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "queued", label: "Queued" },
+  { value: "running", label: "Running" },
+  { value: "waiting", label: "Waiting" },
+  { value: "completed", label: "Completed" },
+  { value: "failed", label: "Failed" },
+  { value: "canceled", label: "Canceled" },
+];
 
 function formatDuration(durationMs: number | null): string {
   if (durationMs == null) {
@@ -45,7 +52,78 @@ function formatDuration(durationMs: number | null): string {
 }
 
 function formatTimestamp(value: string): string {
-  return new Date(value).toLocaleString();
+  return new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatScope(scope: WorkflowRunSummary["scope"]): string {
+  switch (scope) {
+    case "full":
+      return "Full workflow";
+    case "single":
+      return "Single node";
+    case "partial":
+      return "Partial run";
+    default:
+      return scope;
+  }
+}
+
+function getStatusLabel(status: WorkflowRunSummary["status"]): string {
+  switch (status) {
+    case "success":
+      return "Completed";
+    case "failed":
+      return "Failed";
+    case "running":
+      return "Running";
+    case "partial":
+      return "Partial";
+    default:
+      return status;
+  }
+}
+
+function getStatusBadgeClass(status: WorkflowRunSummary["status"]): string {
+  switch (status) {
+    case "success":
+      return "workflow-history-status-completed";
+    case "failed":
+      return "workflow-history-status-failed";
+    case "running":
+      return "workflow-history-status-running";
+    case "partial":
+      return "workflow-history-status-waiting";
+    default:
+      return "workflow-history-status-default";
+  }
+}
+
+function matchesFilter(
+  run: WorkflowRunSummary,
+  filter: HistoryFilter,
+): boolean {
+  if (filter === "all") {
+    return true;
+  }
+
+  if (filter === "running") {
+    return run.status === "running" || run.status === "partial";
+  }
+
+  if (filter === "completed") {
+    return run.status === "success";
+  }
+
+  if (filter === "failed") {
+    return run.status === "failed";
+  }
+
+  return false;
 }
 
 export function WorkflowHistoryPanel({
@@ -54,14 +132,19 @@ export function WorkflowHistoryPanel({
   onClose,
 }: WorkflowHistoryPanelProps) {
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
+  const [activeTab, setActiveTab] = useState<HistoryTab>("ui");
+  const [statusFilter, setStatusFilter] = useState<HistoryFilter>("all");
+  const [filterOpen, setFilterOpen] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [expandedDetail, setExpandedDetail] = useState<WorkflowRunDetail | null>(
     null,
   );
   const [loading, setLoading] = useState(true);
+  const filterRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
 
     getWorkflowRunHistory(workflowId)
       .then((history) => {
@@ -80,6 +163,21 @@ export function WorkflowHistoryPanel({
     };
   }, [workflowId, refreshKey]);
 
+  useEffect(() => {
+    if (!filterOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!filterRef.current?.contains(event.target as Node)) {
+        setFilterOpen(false);
+      }
+    };
+
+    window.addEventListener("mousedown", handlePointerDown);
+    return () => window.removeEventListener("mousedown", handlePointerDown);
+  }, [filterOpen]);
+
   const toggleRun = async (runId: string) => {
     if (expandedRunId === runId) {
       setExpandedRunId(null);
@@ -92,118 +190,200 @@ export function WorkflowHistoryPanel({
     setExpandedDetail(detail);
   };
 
+  const visibleRuns =
+    activeTab === "api"
+      ? []
+      : runs.filter((run) => matchesFilter(run, statusFilter));
+
+  const selectedFilterLabel =
+    FILTER_OPTIONS.find((option) => option.value === statusFilter)?.label ??
+    "All";
+
   return (
-    <aside className="workflow-history-panel flex h-full w-[320px] shrink-0 flex-col border-l border-border-soft bg-surface shadow-elevated">
-      <div className="flex items-center justify-between gap-2 border-b border-border-soft px-3 py-2.5">
-        <div className="flex items-center gap-2">
-          <History className="h-4 w-4 text-accent" />
-          <div>
-            <p className="text-body-sm font-semibold text-foreground">History</p>
-            <p className="text-caption text-muted">Workflow run records</p>
-          </div>
-        </div>
+    <aside className="workflow-history-panel flex h-full w-[360px] shrink-0 flex-col border-l border-border-soft bg-surface">
+      <div className="flex items-center justify-between gap-3 border-b border-border-soft px-4 py-3.5">
+        <h2 className="workflow-history-title text-foreground">
+          Execution History
+        </h2>
         {onClose ? (
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
-            aria-label="Close history"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+            aria-label="Close execution history"
           >
             <X className="h-4 w-4" />
           </button>
         ) : null}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div className="border-b border-border-soft px-4 py-3">
+        <div className="workflow-history-tabs">
+          <button
+            type="button"
+            className={cn(
+              "workflow-history-tab",
+              activeTab === "ui" && "workflow-history-tab-active",
+            )}
+            onClick={() => setActiveTab("ui")}
+          >
+            UI Runs
+          </button>
+          <button
+            type="button"
+            className={cn(
+              "workflow-history-tab",
+              activeTab === "api" && "workflow-history-tab-active",
+            )}
+            onClick={() => setActiveTab("api")}
+          >
+            API Runs
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-4">
+        <p className="workflow-history-section-label text-foreground">
+          Run history
+        </p>
+
+        <div className="relative" ref={filterRef}>
+          <button
+            type="button"
+            className="workflow-history-filter-trigger"
+            onClick={() => setFilterOpen((current) => !current)}
+            aria-haspopup="listbox"
+            aria-expanded={filterOpen}
+          >
+            <span>{selectedFilterLabel}</span>
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 text-muted-foreground transition-transform",
+                filterOpen && "rotate-180",
+              )}
+            />
+          </button>
+
+          {filterOpen ? (
+            <div
+              className="workflow-history-filter-menu"
+              role="listbox"
+              aria-label="Filter runs by status"
+            >
+              {FILTER_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="option"
+                  aria-selected={statusFilter === option.value}
+                  className="workflow-history-filter-option"
+                  onClick={() => {
+                    setStatusFilter(option.value);
+                    setFilterOpen(false);
+                  }}
+                >
+                  <span>{option.label}</span>
+                  {statusFilter === option.value ? (
+                    <Check className="h-3.5 w-3.5 text-foreground" />
+                  ) : (
+                    <span className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         {loading ? (
-          <p className="px-2 py-6 text-center text-body-sm text-muted">
-            Loading history…
-          </p>
-        ) : runs.length === 0 ? (
-          <p className="px-2 py-6 text-center text-body-sm text-muted">
-            No runs yet. Use Run to execute this workflow.
-          </p>
+          <div className="workflow-history-empty-card">
+            <p className="workflow-history-empty-text">Loading runs…</p>
+          </div>
+        ) : visibleRuns.length === 0 ? (
+          <div className="workflow-history-empty-card">
+            <p className="workflow-history-empty-text">No runs for this filter</p>
+          </div>
         ) : (
-          <ul className="stack-sm">
-            {runs.map((run) => {
+          <ul className="flex flex-col gap-2.5">
+            {visibleRuns.map((run) => {
               const isExpanded = expandedRunId === run.id;
 
               return (
-                <li
-                  key={run.id}
-                  className="rounded-card border border-border bg-surface-muted"
-                >
+                <li key={run.id} className="workflow-history-run-card">
                   <button
                     type="button"
                     onClick={() => void toggleRun(run.id)}
-                    className="flex w-full items-start gap-2 px-2.5 py-2.5 text-left"
+                    className="flex w-full items-start gap-2.5 p-3 text-left"
                   >
                     {isExpanded ? (
-                      <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted" />
+                      <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     ) : (
-                      <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted" />
+                      <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     )}
+
                     <div className="min-w-0 flex-1">
-                      <div className="mb-1 flex items-center gap-2">
-                        <Badge variant={runBadgeVariant(run.status)}>
-                          {run.status}
-                        </Badge>
-                        <Badge variant="default">{run.scope}</Badge>
+                      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                        <span
+                          className={cn(
+                            "workflow-history-status-badge",
+                            getStatusBadgeClass(run.status),
+                          )}
+                        >
+                          {getStatusLabel(run.status)}
+                        </span>
+                        <span className="workflow-history-scope-badge">
+                          {formatScope(run.scope)}
+                        </span>
                       </div>
-                      <p className="text-caption text-muted">
+
+                      <p className="workflow-history-run-meta">
                         {formatTimestamp(run.startedAt)}
                       </p>
-                      <p className="text-caption text-muted">
-                        Duration: {formatDuration(run.durationMs)} ·{" "}
-                        {run.executionCount} nodes
+                      <p className="workflow-history-run-meta">
+                        {formatDuration(run.durationMs)} · {run.executionCount}{" "}
+                        {run.executionCount === 1 ? "node" : "nodes"}
                       </p>
                     </div>
                   </button>
 
                   {isExpanded && expandedDetail?.id === run.id ? (
-                    <div className="border-t border-border-soft px-2.5 py-2.5">
-                      <ul className="stack-sm">
+                    <div className="border-t border-border-soft px-3 pb-3 pt-2">
+                      <ul className="flex flex-col gap-2">
                         {expandedDetail.executions.map((execution) => (
                           <li
                             key={execution.id}
-                            className="rounded-button border border-border bg-background px-2.5 py-2"
+                            className="workflow-history-node-card"
                           >
                             <div className="mb-1 flex items-center justify-between gap-2">
-                              <p className="text-body-sm font-medium text-foreground">
+                              <p className="workflow-history-node-name">
                                 {execution.nodeName}
                               </p>
-                              <Badge variant={runBadgeVariant(execution.status)}>
+                              <span
+                                className={cn(
+                                  "workflow-history-status-badge",
+                                  getStatusBadgeClass(
+                                    execution.status === "success"
+                                      ? "success"
+                                      : execution.status === "failed"
+                                        ? "failed"
+                                        : execution.status === "running"
+                                          ? "running"
+                                          : "partial",
+                                  ),
+                                )}
+                              >
                                 {execution.status}
-                              </Badge>
+                              </span>
                             </div>
-                            <p className="text-caption text-muted">
+                            <p className="workflow-history-run-meta">
                               {execution.nodeType} ·{" "}
                               {formatDuration(execution.durationMs)}
                             </p>
                             {execution.error ? (
-                              <p className="mt-1 text-caption text-red-400">
+                              <p className="mt-1 text-[11px] leading-4 text-red-500">
                                 {execution.error}
                               </p>
-                            ) : null}
-                            {execution.input != null ? (
-                              <details className="mt-2">
-                                <summary className="cursor-pointer text-caption text-muted">
-                                  Input
-                                </summary>
-                                <pre className="mt-1 overflow-x-auto rounded-button bg-surface-muted p-2 text-[11px] text-muted">
-                                  {JSON.stringify(execution.input, null, 2)}
-                                </pre>
-                              </details>
-                            ) : null}
-                            {execution.output != null ? (
-                              <details className="mt-2">
-                                <summary className="cursor-pointer text-caption text-muted">
-                                  Output
-                                </summary>
-                                <pre className="mt-1 max-h-32 overflow-auto rounded-button bg-surface-muted p-2 text-[11px] text-muted">
-                                  {JSON.stringify(execution.output, null, 2)}
-                                </pre>
-                              </details>
                             ) : null}
                           </li>
                         ))}

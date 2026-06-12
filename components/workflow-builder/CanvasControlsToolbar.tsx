@@ -4,12 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useReactFlow, useStore } from "reactflow";
 import {
   ChevronLeft,
-  ChevronRight,
   Expand,
   Grid3x3,
-  Hand,
   Keyboard,
+  LayoutGrid,
   Minus,
+  Network,
   PanelLeft,
   Plus,
   Redo2,
@@ -26,10 +26,11 @@ type CanvasControlsToolbarProps = {
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
-  panMode: boolean;
-  onPanModeChange: (enabled: boolean) => void;
+  moveConnectedGroup: boolean;
+  onMoveConnectedGroupChange: (enabled: boolean) => void;
   showGrid: boolean;
   onShowGridChange: (enabled: boolean) => void;
+  onAutoArrange: () => void;
 };
 
 export function CanvasControlsToolbar({
@@ -37,10 +38,11 @@ export function CanvasControlsToolbar({
   onRedo,
   canUndo,
   canRedo,
-  panMode,
-  onPanModeChange,
+  moveConnectedGroup,
+  onMoveConnectedGroupChange,
   showGrid,
   onShowGridChange,
+  onAutoArrange,
 }: CanvasControlsToolbarProps) {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const zoom = useStore((state) => state.transform[2]);
@@ -144,11 +146,19 @@ export function CanvasControlsToolbar({
       </CanvasToolbarButton>
 
       <CanvasToolbarButton
-        label={panMode ? "Selection mode" : "Pan mode"}
-        onClick={() => onPanModeChange(!panMode)}
-        active={panMode}
+        label={
+          moveConnectedGroup
+            ? "Move connected nodes (on) — drag any linked node to move the group"
+            : "Move connected nodes (off) — hold Shift while dragging to move a group"
+        }
+        onClick={() => onMoveConnectedGroupChange(!moveConnectedGroup)}
+        active={moveConnectedGroup}
       >
-        <Hand className="h-4 w-4" />
+        <Network className="h-4 w-4" />
+      </CanvasToolbarButton>
+
+      <CanvasToolbarButton label="Auto arrange" onClick={onAutoArrange}>
+        <LayoutGrid className="h-4 w-4" />
       </CanvasToolbarButton>
     </div>
   );
