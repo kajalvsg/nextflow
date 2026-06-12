@@ -16,6 +16,7 @@ export function ResponseNode({ id, data, selected }: NodeProps<WorkflowNodeData>
       <NodeHandle id="result" type="target" top="50%" />
 
       <NodeCardShell
+        nodeId={id}
         title={data.label}
         subtitle="Workflow Output"
         icon={ArrowUpFromLine}

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { AppShellWithSidebar } from "@/components/layout";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -9,5 +10,5 @@ export default function DashboardLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return <div className="flex min-h-0 flex-1 flex-col">{children}</div>;
+  return <AppShellWithSidebar>{children}</AppShellWithSidebar>;
 }

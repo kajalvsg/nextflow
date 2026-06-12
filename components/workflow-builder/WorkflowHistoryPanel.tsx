@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, History } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronDown, ChevronRight, History, X } from "lucide-react";
 import {
   getWorkflowRunDetail,
   getWorkflowRunHistory,
@@ -15,6 +15,7 @@ import type {
 type WorkflowHistoryPanelProps = {
   workflowId: string;
   refreshKey: number;
+  onClose?: () => void;
 };
 
 function runBadgeVariant(status: string) {
@@ -50,6 +51,7 @@ function formatTimestamp(value: string): string {
 export function WorkflowHistoryPanel({
   workflowId,
   refreshKey,
+  onClose,
 }: WorkflowHistoryPanelProps) {
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
@@ -58,20 +60,25 @@ export function WorkflowHistoryPanel({
   );
   const [loading, setLoading] = useState(true);
 
-  const loadHistory = useCallback(async () => {
-    setLoading(true);
-
-    try {
-      const history = await getWorkflowRunHistory(workflowId);
-      setRuns(history);
-    } finally {
-      setLoading(false);
-    }
-  }, [workflowId]);
-
   useEffect(() => {
-    void loadHistory();
-  }, [loadHistory, refreshKey]);
+    let cancelled = false;
+
+    getWorkflowRunHistory(workflowId)
+      .then((history) => {
+        if (!cancelled) {
+          setRuns(history);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workflowId, refreshKey]);
 
   const toggleRun = async (runId: string) => {
     if (expandedRunId === runId) {
@@ -86,13 +93,25 @@ export function WorkflowHistoryPanel({
   };
 
   return (
-    <aside className="workflow-history-panel flex h-full w-[252px] shrink-0 flex-col border-l border-border-soft bg-surface">
-      <div className="flex items-center gap-2 border-b border-border-soft px-3 py-2.5">
-        <History className="h-4 w-4 text-accent" />
-        <div>
-          <p className="text-body-sm font-semibold text-foreground">History</p>
-          <p className="text-caption text-muted">Workflow run records</p>
+    <aside className="workflow-history-panel flex h-full w-[320px] shrink-0 flex-col border-l border-border-soft bg-surface shadow-elevated">
+      <div className="flex items-center justify-between gap-2 border-b border-border-soft px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <History className="h-4 w-4 text-accent" />
+          <div>
+            <p className="text-body-sm font-semibold text-foreground">History</p>
+            <p className="text-caption text-muted">Workflow run records</p>
+          </div>
         </div>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+            aria-label="Close history"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : null}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">

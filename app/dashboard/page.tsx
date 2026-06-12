@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getWorkflows } from "@/actions/workflows";
+import { getDbErrorMessage } from "@/lib/db/retry";
 import { DashboardContent } from "@/components/dashboard/DashboardContent";
 import { toWorkflowDTO } from "@/types/workflow";
 
@@ -26,10 +27,7 @@ export default async function DashboardPage() {
     workflowDTOs = workflows.map(toWorkflowDTO);
   } catch (error) {
     console.error("[DashboardPage]", error);
-    dbError =
-      error instanceof Error
-        ? error.message
-        : "Could not load workflows from the database.";
+    dbError = getDbErrorMessage(error);
   }
 
   return (

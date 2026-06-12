@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { tasks } from "@trigger.dev/sdk/v3";
 import { z } from "zod";
-import { db } from "@/lib/db";
+import { db, ensureDbReady } from "@/lib/db";
 import { parseStoredGraph } from "@/lib/workflow/canvas";
 import { prepareGraphPayload } from "@/lib/workflow/graph-payload";
 import { planExecutionNodeIds } from "@/lib/workflow/execution/dag";
@@ -103,6 +103,7 @@ function mapSnapshotsToInlineState(
 export async function getLatestWorkflowInlineExecutions(
   workflowId: string,
 ): Promise<Record<string, NodeInlineExecutionState>> {
+  await ensureDbReady();
   const userId = await requireUserId();
 
   const run = await db.workflowRun.findFirst({
@@ -146,6 +147,7 @@ export async function startWorkflowRun(
   input: z.infer<typeof startRunSchema>,
 ): Promise<StartRunResult> {
   try {
+    await ensureDbReady();
     const userId = await requireUserId();
     const triggerError = getTriggerConfigError();
 
@@ -236,6 +238,7 @@ export async function startWorkflowRun(
 export async function getWorkflowRunHistory(
   workflowId: string,
 ): Promise<WorkflowRunSummary[]> {
+  await ensureDbReady();
   const userId = await requireUserId();
 
   const runs = await db.workflowRun.findMany({
@@ -263,6 +266,7 @@ export async function getWorkflowRunHistory(
 export async function getWorkflowRunDetail(
   runId: string,
 ): Promise<WorkflowRunDetail | null> {
+  await ensureDbReady();
   const userId = await requireUserId();
 
   const run = await db.workflowRun.findFirst({

@@ -15,6 +15,7 @@ type WorkflowBuilderContextValue = {
   getNodeExecutionStatus: (nodeId: string) => NodeRuntimeStatus;
   getNodeInlineExecution: (nodeId: string) => NodeInlineExecutionState | null;
   isWorkflowRunning: boolean;
+  runNode: (nodeId: string) => void;
 };
 
 const WorkflowBuilderContext =

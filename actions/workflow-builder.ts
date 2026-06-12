@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { db } from "@/lib/db";
+import { db, ensureDbReady } from "@/lib/db";
 import {
   createDefaultGraph,
   isGraphEmpty,
@@ -42,6 +42,7 @@ export async function getWorkflowForBuilder(
   id: string,
 ): Promise<WorkflowBuilderDTO | null> {
   try {
+    await ensureDbReady();
     const userId = await requireUserId();
     const workflowId = id.trim();
 
@@ -123,6 +124,7 @@ export async function saveWorkflowGraph(
   input: z.infer<typeof saveGraphSchema>,
 ): Promise<ActionResult> {
   try {
+    await ensureDbReady();
     const userId = await requireUserId();
     const parsed = saveGraphSchema.safeParse(input);
 

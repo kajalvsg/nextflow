@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { db } from "@/lib/db";
+import { db, ensureDbReady } from "@/lib/db";
 import { getDbErrorMessage, withDbTimeout } from "@/lib/db/retry";
 import type { ActionResult, WorkflowSummary } from "@/types/workflow";
 import { toWorkflowDTO, type WorkflowSummaryDTO } from "@/types/workflow";
@@ -69,6 +69,7 @@ async function requireUserId(): Promise<string> {
 
 export async function getWorkflows(): Promise<WorkflowSummary[]> {
   try {
+    await ensureDbReady();
     const userId = await requireUserId();
 
     const workflows = await withDbTimeout(() =>
@@ -97,6 +98,7 @@ export async function createWorkflow(
   input: z.infer<typeof createWorkflowSchema>,
 ): Promise<ActionResult<WorkflowSummaryDTO>> {
   try {
+    await ensureDbReady();
     const userId = await requireUserId();
     const parsed = createWorkflowSchema.safeParse(input);
 
@@ -141,6 +143,7 @@ export async function updateWorkflow(
   input: z.infer<typeof updateWorkflowSchema>,
 ): Promise<ActionResult<WorkflowSummaryDTO>> {
   try {
+    await ensureDbReady();
     const userId = await requireUserId();
     const parsed = updateWorkflowSchema.safeParse(input);
 
@@ -192,6 +195,7 @@ export async function deleteWorkflow(
   input: z.infer<typeof deleteWorkflowSchema>,
 ): Promise<ActionResult> {
   try {
+    await ensureDbReady();
     const userId = await requireUserId();
     const parsed = deleteWorkflowSchema.safeParse(input);
 

@@ -27,19 +27,21 @@ export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData
       <NodeHandle id="output_image" type="source" top="72%" />
 
       <NodeCardShell
+        nodeId={id}
         title={data.label}
         subtitle="Image Processing"
         icon={Crop}
         selected={selected}
         executionStatus={getNodeExecutionStatus(id)}
       >
-        <div className="nodrag nopan nowheel grid grid-cols-2 gap-3">
+        <div className="nodrag nopan nowheel grid grid-cols-2 gap-2">
           <Input
             label="X Position (%)"
             type="number"
             min={0}
             max={100}
             value={config.xPercent}
+            className="workflow-node-field"
             onChange={(event) =>
               updateConfig({ xPercent: Number(event.target.value) })
             }
@@ -50,6 +52,7 @@ export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData
             min={0}
             max={100}
             value={config.yPercent}
+            className="workflow-node-field"
             onChange={(event) =>
               updateConfig({ yPercent: Number(event.target.value) })
             }
@@ -60,6 +63,7 @@ export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData
             min={1}
             max={100}
             value={config.widthPercent}
+            className="workflow-node-field"
             onChange={(event) =>
               updateConfig({ widthPercent: Number(event.target.value) })
             }
@@ -70,6 +74,7 @@ export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData
             min={1}
             max={100}
             value={config.heightPercent}
+            className="workflow-node-field"
             onChange={(event) =>
               updateConfig({ heightPercent: Number(event.target.value) })
             }

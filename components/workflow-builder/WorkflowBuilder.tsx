@@ -5,8 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   Background,
   BackgroundVariant,
-  Controls,
-  MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
@@ -27,6 +26,7 @@ import {
 } from "@/actions/workflow-execution";
 import { saveWorkflowGraph } from "@/actions/workflow-builder";
 import { PROTECTED_NODE_IDS, sanitizeGraphForSave } from "@/lib/workflow/canvas";
+import { getEdgeStrokeColor } from "@/lib/workflow/edge-colors";
 import { prepareGraphPayload, serializeGraphPayload } from "@/lib/workflow/graph-payload";
 import {
   buildWorkflowExportDocument,
@@ -64,6 +64,9 @@ import { GeminiProNode } from "./nodes/GeminiProNode";
 import { RequestInputsNode } from "./nodes/RequestInputsNode";
 import { ResponseNode } from "./nodes/ResponseNode";
 import { NodePicker } from "./NodePicker";
+import { CanvasBottomToolbar } from "./CanvasBottomToolbar";
+import { CanvasControlsToolbar } from "./CanvasControlsToolbar";
+import { CanvasMinimapPanel } from "./CanvasMinimapPanel";
 import { WorkflowBuilderProvider } from "./WorkflowBuilderContext";
 import { WorkflowBuilderTopBar } from "./WorkflowBuilderTopBar";
 import { WorkflowHistoryPanel } from "./WorkflowHistoryPanel";
@@ -137,9 +140,15 @@ type NodePickerPanelProps = {
     type: AddableWorkflowNodeType,
     position: { x: number; y: number },
   ) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 };
 
-function NodePickerOverlay({ onAddNode }: NodePickerPanelProps) {
+function NodePickerOverlay({
+  onAddNode,
+  open,
+  onOpenChange,
+}: NodePickerPanelProps) {
   const reactFlow = useReactFlow();
 
   const handleSelectType = useCallback(
@@ -151,8 +160,13 @@ function NodePickerOverlay({ onAddNode }: NodePickerPanelProps) {
   );
 
   return (
-    <div className="workflow-node-picker-overlay pointer-events-none absolute inset-x-0 bottom-6 flex justify-center">
-      <NodePicker onSelectType={handleSelectType} />
+    <div className="workflow-node-picker-overlay pointer-events-none absolute inset-x-0 bottom-[4.75rem] flex justify-center">
+      <NodePicker
+        open={open}
+        onOpenChange={onOpenChange}
+        showTrigger={false}
+        onSelectType={handleSelectType}
+      />
     </div>
   );
 }
@@ -214,7 +228,12 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     Record<string, NodeInlineExecutionState>
   >({});
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
-  const [runScopeLabel, setRunScopeLabel] = useState<string | null>(null);
+  const [historyTick, setHistoryTick] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [nodePickerOpen, setNodePickerOpen] = useState(false);
+  const [showMinimap, setShowMinimap] = useState(true);
+  const [showGrid, setShowGrid] = useState(true);
+  const [panMode, setPanMode] = useState(false);
   const [canRunWorkflow, setCanRunWorkflow] = useState(true);
   const [isLeaving, setIsLeaving] = useState(false);
 
@@ -356,6 +375,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       historyRef.current,
       cloneGraphSnapshot(nodesRef.current, edgesRef.current),
     );
+    setHistoryTick((current) => current + 1);
   }, []);
 
   const recordFieldEditHistory = useCallback(() => {
@@ -422,6 +442,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
         historyRef.current,
         cloneGraphSnapshot(nextNodes, nextEdges),
       );
+      setHistoryTick((current) => current + 1);
       isHistoryActionRef.current = false;
 
       const saved = await persistGraphNow(nextNodes, nextEdges);
@@ -581,6 +602,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
     historyRef.current = result.stack;
     applySnapshot(result.snapshot);
+    setHistoryTick((current) => current + 1);
   }, [applySnapshot]);
 
   const redo = useCallback(() => {
@@ -593,7 +615,17 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
     historyRef.current = result.stack;
     applySnapshot(result.snapshot);
+    setHistoryTick((current) => current + 1);
   }, [applySnapshot]);
+
+  const canUndo =
+    historyTick >= 0 && historyRef.current.past.length > 0;
+  const canRedo =
+    historyTick >= 0 && historyRef.current.future.length > 0;
+
+  const handleAddStickyNote = useCallback(() => {
+    showToast("Sticky notes are coming soon.");
+  }, [showToast]);
 
   const updateNodeData = useCallback(
     (
@@ -809,7 +841,10 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
           {
             ...connection,
             animated: true,
-            style: { stroke: "#8b7cf7", strokeWidth: 2 },
+            style: {
+              stroke: getEdgeStrokeColor(connection.sourceHandle),
+              strokeWidth: 2,
+            },
           },
           current,
         );
@@ -955,7 +990,6 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     setActiveNodeIds([]);
     setIsWorkflowRunning(false);
     setActiveRunId(null);
-    setRunScopeLabel(null);
   }, []);
 
   const handleRun = useCallback(async () => {
@@ -980,13 +1014,6 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       scope = "partial";
     }
 
-  const scopeLabels: Record<RunScope, string> = {
-    full: "Run full workflow",
-    single: "Run selected node",
-    partial: "Run selected nodes",
-  };
-
-    setRunScopeLabel(scopeLabels[scope]);
     setIsWorkflowRunning(true);
     setNodeStatuses({});
     setActiveNodeIds([]);
@@ -1041,6 +1068,30 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     showToast,
     workflowId,
   ]);
+
+  const runNode = useCallback(
+    (nodeId: string) => {
+      setNodes((current) => {
+        const next = current.map((node) => ({
+          ...node,
+          selected: node.id === nodeId,
+        }));
+        nodesRef.current = next;
+        return next;
+      });
+
+      setEdges((current) => {
+        const next = current.map((edge) => ({ ...edge, selected: false }));
+        edgesRef.current = next;
+        return next;
+      });
+
+      queueMicrotask(() => {
+        void handleRun();
+      });
+    },
+    [handleRun],
+  );
 
   useEffect(() => {
     if (!activeRunId || !isWorkflowRunning) {
@@ -1173,11 +1224,19 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
         const touchesRunning =
           runningNodeIdSet.has(edge.source) ||
           runningNodeIdSet.has(edge.target);
+        const strokeColor =
+          (edge.style as { stroke?: string } | undefined)?.stroke ??
+          getEdgeStrokeColor(edge.sourceHandle);
 
         return {
           ...edge,
           animated: isWorkflowRunning ? touchesRunning : (edge.animated ?? true),
           className: touchesRunning ? "workflow-edge-running" : edge.className,
+          style: {
+            ...edge.style,
+            stroke: strokeColor,
+            strokeWidth: touchesRunning ? 2.5 : 2,
+          },
         };
       }),
     [edges, runningNodeIdSet, isWorkflowRunning],
@@ -1192,6 +1251,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       getNodeExecutionStatus,
       getNodeInlineExecution,
       isWorkflowRunning,
+      runNode,
     }),
     [
       workflow.id,
@@ -1201,25 +1261,13 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       getNodeExecutionStatus,
       getNodeInlineExecution,
       isWorkflowRunning,
+      runNode,
     ],
   );
 
   return (
     <WorkflowBuilderProvider value={builderContextValue}>
-      <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-        <WorkflowBuilderTopBar
-          workflowName={workflow.name}
-          saveStatus={saveStatus}
-          isRunning={isWorkflowRunning}
-          isLeaving={isLeaving}
-          canRun={canRunWorkflow && saveStatus !== "error"}
-          runScopeLabel={runScopeLabel}
-          onNavigateDashboard={() => void handleNavigateToDashboard()}
-          onRun={() => void handleRun()}
-          onExportJson={handleExportJson}
-          onImportJson={handleImportJsonClick}
-          onLoadSample={() => void handleLoadSample()}
-        />
+      <div className="flex h-full min-h-0 flex-1 overflow-hidden">
         <input
           ref={importFileInputRef}
           type="file"
@@ -1227,9 +1275,26 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
           className="hidden"
           onChange={(event) => void handleImportFileChange(event)}
         />
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <div className="workflow-canvas relative min-h-0 min-w-0 flex-1">
+        <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <div
+          className={`workflow-canvas workflow-canvas-surface relative min-h-0 min-w-0 flex-1${panMode ? " workflow-canvas-pan-mode" : ""}`}
+        >
+            <WorkflowBuilderTopBar
+              workflowName={workflow.name}
+              saveStatus={saveStatus}
+              isRunning={isWorkflowRunning}
+              isLeaving={isLeaving}
+              canRun={canRunWorkflow && saveStatus !== "error"}
+              historyOpen={historyOpen}
+              onNavigateDashboard={() => void handleNavigateToDashboard()}
+              onRun={() => void handleRun()}
+              onToggleHistory={() => setHistoryOpen((current) => !current)}
+              onExportJson={handleExportJson}
+              onImportJson={handleImportJsonClick}
+              onLoadSample={() => void handleLoadSample()}
+            />
             <WorkflowToast message={toastMessage} />
+            <div className="absolute inset-0">
           <ReactFlow
             nodes={nodes}
             edges={displayEdges}
@@ -1251,28 +1316,60 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
             minZoom={0.2}
             maxZoom={2}
             proOptions={{ hideAttribution: true }}
-            className="bg-background"
+            panOnDrag={panMode}
+            panOnScroll
+            selectionOnDrag={!panMode}
+            className="h-full w-full bg-transparent"
           >
             <CanvasInitializer />
-            <Background
-              variant={BackgroundVariant.Dots}
-              gap={20}
-              size={1.2}
-              color="#2a2a34"
-            />
-            <Controls className="workflow-controls" showInteractive={false} />
-            <MiniMap
-              className="workflow-minimap"
-              nodeColor="#8b7cf7"
-              maskColor="rgb(12 12 16 / 0.75)"
-            />
+            {showGrid ? (
+              <Background
+                variant={BackgroundVariant.Dots}
+                gap={20}
+                size={2}
+                offset={1}
+                color="#b8b8c0"
+              />
+            ) : null}
+            <Panel position="bottom-left" className="!m-4">
+              <CanvasControlsToolbar
+                onUndo={undo}
+                onRedo={redo}
+                canUndo={canUndo}
+                canRedo={canRedo}
+                panMode={panMode}
+                onPanModeChange={setPanMode}
+                showGrid={showGrid}
+                onShowGridChange={setShowGrid}
+              />
+            </Panel>
+            <Panel position="bottom-center" className="!mb-4">
+              <CanvasBottomToolbar
+                onAddNode={() => setNodePickerOpen(true)}
+                onAddStickyNote={handleAddStickyNote}
+              />
+            </Panel>
+            <Panel position="bottom-right" className="!m-4">
+              <CanvasMinimapPanel
+                visible={showMinimap}
+                onToggle={() => setShowMinimap((current) => !current)}
+              />
+            </Panel>
           </ReactFlow>
-            <NodePickerOverlay onAddNode={addNode} />
+            </div>
+            <NodePickerOverlay
+              onAddNode={addNode}
+              open={nodePickerOpen}
+              onOpenChange={setNodePickerOpen}
+            />
           </div>
-          <WorkflowHistoryPanel
-            workflowId={workflow.id}
-            refreshKey={historyRefreshKey}
-          />
+          {historyOpen ? (
+            <WorkflowHistoryPanel
+              workflowId={workflow.id}
+              refreshKey={historyRefreshKey}
+              onClose={() => setHistoryOpen(false)}
+            />
+          ) : null}
         </div>
       </div>
     </WorkflowBuilderProvider>

@@ -30,7 +30,7 @@ import {
   markNodeExecutionSuccess,
   settlePlannedExecutions,
 } from "@/lib/workflow/execution/run-store";
-import { db } from "@/lib/db";
+import { db, ensureDbReady } from "@/lib/db";
 import type { RunScope, RunStatus } from "@/types/workflow-execution";
 import { cropImageTask } from "./crop-image";
 import { geminiProTask } from "./gemini-pro";
@@ -51,6 +51,8 @@ export const workflowOrchestratorTask = task({
     maxAttempts: 1,
   },
   run: async (payload: WorkflowOrchestratorPayload) => {
+    await ensureDbReady();
+
     const run = await db.workflowRun.findUnique({
       where: { id: payload.runId },
       include: { executions: true },

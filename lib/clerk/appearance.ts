@@ -1,35 +1,27 @@
-import { dark } from "@clerk/themes";
-
 /**
  * Shared Clerk appearance for the entire app.
  * Used by ClerkProvider — covers sign-in, sign-up, UserButton, and modals.
- *
- * When adding new Clerk components, add matching element keys here AND
- * styles in app/globals.css under the "Clerk dark UI" section.
  */
 export const clerkAppearance = {
-  baseTheme: dark,
   variables: {
-    colorPrimary: "#8b7cf7",
-    colorBackground: "#16161c",
-    colorInputBackground: "#1c1c24",
-    colorInputText: "#f4f4f5",
-    colorText: "#f4f4f5",
-    colorTextSecondary: "#a1a1aa",
+    colorPrimary: "#7c3aed",
+    colorBackground: "#ffffff",
+    colorInputBackground: "#f3f3f6",
+    colorInputText: "#111118",
+    colorText: "#111118",
+    colorTextSecondary: "#71717a",
     colorTextOnPrimaryBackground: "#ffffff",
-    colorDanger: "#f87171",
-    colorNeutral: "#a1a1aa",
+    colorDanger: "#ef4444",
+    colorNeutral: "#71717a",
     borderRadius: "0.75rem",
     fontFamily: "var(--font-inter), system-ui, sans-serif",
   },
   elements: {
-    /* ── Shared ── */
     rootBox: "mx-auto w-full text-foreground",
     cardBox: "shadow-card",
     card: "bg-surface border border-border rounded-xl text-foreground",
     logoBox: "hidden",
 
-    /* ── Sign in / Sign up ── */
     headerTitle: "text-foreground text-heading-sm",
     headerSubtitle: "text-muted",
     formHeaderTitle: "text-foreground",
@@ -56,7 +48,6 @@ export const clerkAppearance = {
     socialButtonsBlockButtonText: "!text-zinc-900 font-medium",
     socialButtonsProviderIcon: "opacity-100",
 
-    /* ── UserButton popover ── */
     userButtonBox: "flex",
     userButtonTrigger: "focus:shadow-none",
     userButtonAvatarBox: "h-9 w-9 ring-2 ring-border",

@@ -157,6 +157,7 @@ export function RequestInputsNode({
 
   return (
     <NodeCardShell
+      nodeId={id}
       title={data.label}
       subtitle="Workflow Input"
       icon={ArrowDownToLine}
@@ -177,7 +178,7 @@ export function RequestInputsNode({
           value={config.textField}
           disabled={textFieldConnected}
           onChange={(event) => handleTextChange(event.target.value)}
-          className="min-h-20 text-body-sm"
+          className="workflow-node-field min-h-[72px] text-body-sm"
         />
         {textFieldConnected ? (
           <p className="text-caption text-muted">

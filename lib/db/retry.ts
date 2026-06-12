@@ -80,11 +80,17 @@ export async function withDbRetry<T>(
 }
 
 export function getDbErrorMessage(error: unknown): string {
+  const usingLocalDb = process.env.USE_LOCAL_DB === "true";
+
   if (error && typeof error === "object" && "code" in error) {
     const code = String(error.code);
 
     if (code === "ETIMEDOUT" || code === "ENOTFOUND" || code === "P2024") {
-      return "Could not reach the database. Check your network connection and DATABASE_URL, then try again.";
+      if (usingLocalDb) {
+        return "Local database failed to start. Run npm run db:push, then restart the dev server.";
+      }
+
+      return "Could not reach Neon. Open console.neon.tech, copy a fresh pooled DATABASE_URL into .env.local, run npm run db:push, then restart the dev server.";
     }
   }
 
@@ -92,12 +98,26 @@ export function getDbErrorMessage(error: unknown): string {
     const message = error.message.toLowerCase();
 
     if (
+      message.includes("aborted") ||
+      message.includes("pglite") ||
+      message.includes("not ready") ||
+      message.includes("wasm")
+    ) {
+      return "Local database failed to start. Run npm run db:push, then restart the dev server.";
+    }
+
+    if (
       message.includes("timed out") ||
       message.includes("timeout") ||
       message.includes("fetch failed") ||
-      message.includes("connect")
+      message.includes("connect timeout") ||
+      (message.includes("connect") && !usingLocalDb)
     ) {
-      return "Could not reach the database. Check your network connection and DATABASE_URL, then try again.";
+      if (usingLocalDb) {
+        return "Local database failed to start. Run npm run db:push, then restart the dev server.";
+      }
+
+      return "Could not reach Neon. Open console.neon.tech, copy a fresh pooled DATABASE_URL into .env.local, run npm run db:push, then restart the dev server.";
     }
 
     return error.message;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Crop, Plus, Search, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -15,10 +15,31 @@ const PICKER_ICONS = {
 
 type NodePickerProps = {
   onSelectType: (type: AddableWorkflowNodeType) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  showTrigger?: boolean;
 };
 
-export function NodePicker({ onSelectType }: NodePickerProps) {
-  const [open, setOpen] = useState(false);
+export function NodePicker({
+  onSelectType,
+  open: controlledOpen,
+  onOpenChange,
+  showTrigger = true,
+}: NodePickerProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (onOpenChange) {
+        onOpenChange(next);
+        return;
+      }
+
+      setInternalOpen(next);
+    },
+    [onOpenChange],
+  );
   const [query, setQuery] = useState("");
 
   const items = useMemo(() => {
@@ -49,13 +70,13 @@ export function NodePicker({ onSelectType }: NodePickerProps) {
   };
 
   const handleToggle = () => {
-    setOpen((current) => !current);
+    setOpen(!open);
   };
 
   return (
     <div className="nodrag nopan nowheel pointer-events-auto flex flex-col items-center gap-3">
       {open ? (
-        <div className="w-[min(92vw,420px)] rounded-card border border-border bg-surface shadow-elevated">
+        <div className="w-[min(92vw,400px)] rounded-xl border border-border bg-surface shadow-elevated">
           <div className="flex items-center justify-between border-b border-border-soft px-4 py-3">
             <div>
               <p className="text-body-sm font-semibold text-foreground">Add node</p>
@@ -125,18 +146,20 @@ export function NodePicker({ onSelectType }: NodePickerProps) {
         </div>
       ) : null}
 
-      <Button
-        type="button"
-        size="lg"
-        className={cn(
-          "h-14 w-14 rounded-full p-0 shadow-elevated",
-          open && "ring-2 ring-accent/40",
-        )}
-        onClick={handleToggle}
-        aria-label="Add workflow node"
-      >
-        <Plus className={cn("h-6 w-6 transition-transform", open && "rotate-45")} />
-      </Button>
+      {showTrigger ? (
+        <div className="flex items-center gap-1 rounded-full border border-border bg-surface p-1 shadow-card">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-9 w-9 rounded-full p-0 text-muted hover:text-foreground"
+            onClick={handleToggle}
+            aria-label="Add workflow node"
+          >
+            <Plus className={cn("h-5 w-5 transition-transform", open && "rotate-45")} />
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

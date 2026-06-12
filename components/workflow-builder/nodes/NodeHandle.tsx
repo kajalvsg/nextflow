@@ -1,6 +1,7 @@
 "use client";
 
 import { Handle, Position, type HandleType } from "reactflow";
+import { getHandleColorClass } from "@/lib/workflow/edge-colors";
 import { cn } from "@/lib/utils/cn";
 
 type NodeHandleProps = {
@@ -25,7 +26,10 @@ export function NodeHandle({ id, type, top }: NodeHandleProps) {
         type={type}
         position={isSource ? Position.Right : Position.Left}
         aria-label={id}
-        className="workflow-handle-dot pointer-events-auto !relative !left-auto !right-auto !top-auto !translate-x-0 !translate-y-0"
+        className={cn(
+          "workflow-handle-dot pointer-events-auto !relative !left-auto !right-auto !top-auto !translate-x-0 !translate-y-0",
+          getHandleColorClass(id),
+        )}
       />
     </div>
   );

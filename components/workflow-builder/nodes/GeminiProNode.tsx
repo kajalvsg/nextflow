@@ -30,21 +30,22 @@ export function GeminiProNode({ id, data, selected }: NodeProps<WorkflowNodeData
       <NodeHandle id="response" type="source" top="82%" />
 
       <NodeCardShell
+        nodeId={id}
         title={data.label}
         subtitle="AI Model"
         icon={Sparkles}
         selected={selected}
         executionStatus={getNodeExecutionStatus(id)}
       >
-        <p className="text-body-sm text-muted">
+        <p className="text-body-sm text-muted-foreground">
           Connect prompt, system prompt, and optional vision image inputs.
         </p>
 
-        <div className="nodrag nopan nowheel border-t border-border-soft pt-3">
+        <div className="nodrag nopan nowheel border-t border-border-soft pt-2">
           <button
             type="button"
             onClick={() => updateConfig({ settingsOpen: !config.settingsOpen })}
-            className="flex w-full items-center justify-between rounded-button px-1 py-1 text-left text-label text-foreground hover:bg-surface-muted"
+            className="flex w-full items-center justify-between rounded-md px-1 py-1 text-left text-[11px] font-medium text-foreground hover:bg-surface-muted"
           >
             Settings
             <ChevronDown
@@ -56,7 +57,7 @@ export function GeminiProNode({ id, data, selected }: NodeProps<WorkflowNodeData
           </button>
 
           {config.settingsOpen ? (
-            <div className="mt-3 grid grid-cols-2 gap-3">
+            <div className="mt-2 grid grid-cols-2 gap-2">
               <Input
                 label="Temperature"
                 type="number"
@@ -64,6 +65,7 @@ export function GeminiProNode({ id, data, selected }: NodeProps<WorkflowNodeData
                 max={2}
                 step={0.1}
                 value={config.temperature}
+                className="workflow-node-field"
                 onChange={(event) =>
                   updateConfig({ temperature: Number(event.target.value) })
                 }
@@ -75,6 +77,7 @@ export function GeminiProNode({ id, data, selected }: NodeProps<WorkflowNodeData
                 max={65536}
                 step={256}
                 value={config.maxOutputTokens}
+                className="workflow-node-field"
                 onChange={(event) =>
                   updateConfig({ maxOutputTokens: Number(event.target.value) })
                 }

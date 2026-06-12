@@ -38,6 +38,21 @@ A visual AI workflow builder built with Next.js. Design node-based pipelines on 
 
 Connect nodes by dragging handles. Request Inputs and Response are always present on the canvas.
 
+## Troubleshooting
+
+### Clerk: “Infinite redirect loop” / session token refresh
+
+This usually happens for one of these reasons:
+
+1. **Publishable and secret keys are from different Clerk apps** — In [Clerk Dashboard](https://dashboard.clerk.com) → your app → **API Keys**, copy **both** keys again into `.env.local`, then restart `npm run dev`.
+2. **Browser URL does not match `NEXT_PUBLIC_APP_URL`** — If you open `http://10.x.x.x:3000`, set `NEXT_PUBLIC_APP_URL` to that same URL (not `localhost`).
+3. **Stale cookies** — Clear site data for your dev host (especially `__client_uat` and Clerk session cookies), or use a private/incognito window.
+4. **LAN / network access** — Add your machine IP to `ALLOWED_DEV_ORIGINS` in `.env.local` and restart the dev server. In Clerk Dashboard → **Configure** → **Domains**, allow your dev origin if required.
+
+### Next.js: “Blocked cross-origin request” in dev
+
+Add the IP shown in the terminal to `ALLOWED_DEV_ORIGINS` in `.env.local` (comma-separated), or use the defaults in `next.config.ts`. Restart `npm run dev` after changing env vars.
+
 ## Prerequisites
 
 - Node.js 20+

@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { db, ensureDbReady } from "@/lib/db";
 import { defaultLabelForNodeType } from "@/lib/workflow/node-defaults";
 import type { RunScope, RunStatus } from "@/types/workflow-execution";
 import type { WorkflowNodeType } from "@/types/workflow-canvas";
@@ -9,6 +9,8 @@ export async function createWorkflowRunRecord(input: {
   scope: RunScope;
   plannedNodes: Array<{ id: string; nodeType: WorkflowNodeType }>;
 }) {
+  await ensureDbReady();
+
   const run = await db.workflowRun.create({
     data: {
       workflowId: input.workflowId,
@@ -32,6 +34,8 @@ export async function createWorkflowRunRecord(input: {
 }
 
 export async function markNodeExecutionRunning(executionId: string) {
+  await ensureDbReady();
+
   return db.nodeExecution.update({
     where: { id: executionId },
     data: {
@@ -47,6 +51,8 @@ export async function markNodeExecutionSuccess(
   output: unknown,
   startedAt: Date,
 ) {
+  await ensureDbReady();
+
   const endedAt = new Date();
 
   return db.nodeExecution.update({
@@ -68,6 +74,8 @@ export async function markNodeExecutionFailed(
   startedAt: Date,
   fallbackOutput?: unknown,
 ) {
+  await ensureDbReady();
+
   const endedAt = new Date();
 
   return db.nodeExecution.update({
@@ -89,6 +97,8 @@ export async function settlePlannedExecutions(
   completedNodeIds: Set<string>,
   executionByNodeId: Map<string, { id: string }>,
 ) {
+  await ensureDbReady();
+
   for (const nodeId of plannedNodeIds) {
     if (completedNodeIds.has(nodeId)) {
       continue;
@@ -109,6 +119,8 @@ export async function settlePlannedExecutions(
 }
 
 export async function markNodeExecutionSkipped(executionId: string) {
+  await ensureDbReady();
+
   return db.nodeExecution.update({
     where: { id: executionId },
     data: {
@@ -124,6 +136,8 @@ export async function finalizeWorkflowRun(
   status: RunStatus,
   startedAt: Date,
 ) {
+  await ensureDbReady();
+
   const endedAt = new Date();
 
   return db.workflowRun.update({

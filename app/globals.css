@@ -3,34 +3,42 @@
 /* ─── Design tokens ─────────────────────────────────────────────────────────── */
 
 :root {
-  /* Surfaces — dark-first theme */
-  --background: #0c0c10;
-  --foreground: #f4f4f5;
-  --surface: #16161c;
-  --surface-muted: #1c1c24;
-  --surface-hover: #22222c;
+  /* Surfaces — Magica-style light theme */
+  --background: #f7f7f7;
+  --foreground: #111118;
+  --surface: #ffffff;
+  --surface-muted: #f3f3f6;
+  --surface-hover: #ececf0;
 
   /* Borders */
-  --border: #2a2a34;
-  --border-soft: #22222c;
+  --border: #e4e4ea;
+  --border-soft: #efeff3;
 
   /* Text hierarchy */
-  --muted: #a1a1aa;
-  --muted-foreground: #71717a;
+  --muted: #52525b;
+  --muted-foreground: #a1a1aa;
 
-  /* Accent — soft lavender / violet (Galaxy.ai inspired) */
-  --accent: #8b7cf7;
-  --accent-hover: #9d8ff9;
-  --accent-soft: #2e2a4a;
-  --accent-muted: #6b5ad9;
+  /* Accent — purple primary */
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --accent-soft: #ede9fe;
+  --accent-muted: #c4b5fd;
   --accent-foreground: #ffffff;
 
+  /* Canvas */
+  --canvas-dot: #d4d4d8;
+
+  /* Connection colors */
+  --edge-text: #f97316;
+  --edge-image: #3b82f6;
+  --edge-default: #22c55e;
+
   /* Shadows */
-  --shadow-soft: 0 1px 2px 0 rgb(0 0 0 / 0.2);
-  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.3),
-    0 1px 2px -1px rgb(0 0 0 / 0.2);
-  --shadow-elevated: 0 4px 12px -2px rgb(0 0 0 / 0.4),
-    0 2px 4px -2px rgb(0 0 0 / 0.2);
+  --shadow-soft: 0 1px 2px 0 rgb(15 15 20 / 0.04);
+  --shadow-card: 0 1px 3px 0 rgb(15 15 20 / 0.06),
+    0 1px 2px -1px rgb(15 15 20 / 0.04);
+  --shadow-elevated: 0 8px 24px -4px rgb(15 15 20 / 0.1),
+    0 2px 6px -2px rgb(15 15 20 / 0.05);
 
   /* Radius */
   --radius-card: 0.75rem;
@@ -40,34 +48,6 @@
   --space-section: 3rem;
   --space-section-lg: 4.5rem;
   --space-gutter: 1.5rem;
-}
-
-@media (prefers-color-scheme: light) {
-  :root:not(.dark) {
-    --background: #f8f8fa;
-    --foreground: #0f0f14;
-    --surface: #ffffff;
-    --surface-muted: #f3f3f6;
-    --surface-hover: #ececf0;
-
-    --border: #e4e4ea;
-    --border-soft: #efeff3;
-
-    --muted: #71717a;
-    --muted-foreground: #a1a1aa;
-
-    --accent: #7c6cf0;
-    --accent-hover: #6b5ad9;
-    --accent-soft: #ede9fe;
-    --accent-muted: #c4b5fd;
-    --accent-foreground: #ffffff;
-
-    --shadow-soft: 0 1px 2px 0 rgb(15 15 20 / 0.04);
-    --shadow-card: 0 1px 3px 0 rgb(15 15 20 / 0.06),
-      0 1px 2px -1px rgb(15 15 20 / 0.04);
-    --shadow-elevated: 0 4px 12px -2px rgb(15 15 20 / 0.08),
-      0 2px 4px -2px rgb(15 15 20 / 0.04);
-  }
 }
 
 /* ─── Tailwind theme bridge ─────────────────────────────────────────────────── */
@@ -343,27 +323,27 @@ html.dark .cl-userButtonPopoverFooter svg {
 /* ─── Clerk auth forms (sign-in / sign-up pages) ────────────────────────────── */
 
 .clerk-auth {
-  --clerk-color-primary: #8b7cf7;
-  --clerk-color-text: #f4f4f5;
-  --clerk-color-text-secondary: #a1a1aa;
-  --clerk-color-background: #16161c;
-  --clerk-color-input: #1c1c24;
-  --clerk-color-input-text: #f4f4f5;
-  --clerk-color-neutral: #a1a1aa;
-  --clerk-color-danger: #f87171;
+  --clerk-color-primary: #7c3aed;
+  --clerk-color-text: #111118;
+  --clerk-color-text-secondary: #71717a;
+  --clerk-color-background: #ffffff;
+  --clerk-color-input: #f3f3f6;
+  --clerk-color-input-text: #111118;
+  --clerk-color-neutral: #71717a;
+  --clerk-color-danger: #ef4444;
 }
 
 .clerk-auth .cl-rootBox,
 .clerk-auth .cl-card,
 .clerk-auth .cl-cardBox,
 .clerk-auth .cl-main {
-  color: #f4f4f5 !important;
+  color: #111118 !important;
 }
 
 .clerk-auth .cl-card {
-  background-color: #16161c !important;
-  border: 1px solid #2a2a34 !important;
-  box-shadow: 0 4px 12px -2px rgb(0 0 0 / 0.4) !important;
+  background-color: #ffffff !important;
+  border: 1px solid #e4e4ea !important;
+  box-shadow: 0 8px 24px -4px rgb(15 15 20 / 0.1) !important;
 }
 
 .clerk-auth .cl-headerTitle,
@@ -501,28 +481,29 @@ html.dark .cl-userButtonPopoverFooter svg {
 }
 
 .workflow-canvas .react-flow__edge-path {
-  stroke: #8b7cf7;
   stroke-width: 2;
 }
 
 .workflow-canvas .react-flow__edge.selected .react-flow__edge-path {
-  stroke: #a78bfa;
   stroke-width: 3;
+  filter: brightness(1.08);
 }
 
 .workflow-canvas .react-flow__edge:hover .react-flow__edge-path {
-  stroke: #a78bfa;
+  stroke-width: 2.5;
+  filter: brightness(1.05);
 }
 
 .workflow-controls {
   border: 1px solid var(--border) !important;
-  border-radius: var(--radius-card) !important;
+  border-radius: 0.75rem !important;
   overflow: hidden;
   box-shadow: var(--shadow-card);
+  background: var(--surface) !important;
 }
 
 .workflow-controls button {
-  background: var(--surface-muted) !important;
+  background: var(--surface) !important;
   border-bottom: 1px solid var(--border-soft) !important;
   fill: var(--muted) !important;
 }
@@ -537,10 +518,146 @@ html.dark .cl-userButtonPopoverFooter svg {
   background: var(--surface) !important;
   box-shadow: var(--shadow-card);
   margin-right: 0 !important;
+  width: 160px !important;
+  height: 120px !important;
+}
+
+/* Magica-style floating canvas toolbars */
+.canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  padding: 0.25rem;
+  box-shadow: var(--shadow-card);
+}
+
+.canvas-toolbar-compact {
+  padding: 0.125rem;
+}
+
+.canvas-toolbar-btn {
+  display: flex;
+  height: 2rem;
+  width: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  color: var(--muted);
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.canvas-toolbar-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.canvas-toolbar-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.canvas-toolbar-btn-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.canvas-toolbar-divider {
+  width: 1px;
+  height: 1.25rem;
+  margin-inline: 0.125rem;
+  background: var(--border-soft);
+}
+
+.canvas-toolbar-zoom-label {
+  min-width: 3rem;
+  padding-inline: 0.375rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+  border-radius: 0.5rem;
+  transition: background-color 0.15s ease;
+}
+
+.canvas-toolbar-zoom-label:hover {
+  background: var(--surface-hover);
+}
+
+.canvas-toolbar-tooltip {
+  border: 1px solid var(--border-soft);
+  border-radius: 0.375rem;
+  background: var(--surface);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--foreground);
+  box-shadow: var(--shadow-soft);
+}
+
+.workflow-canvas-pan-mode .react-flow__pane {
+  cursor: grab !important;
+}
+
+.workflow-canvas-pan-mode .react-flow__pane:active {
+  cursor: grabbing !important;
 }
 
 .workflow-history-panel {
-  max-width: min(252px, 32vw);
+  max-width: min(320px, 36vw);
+}
+
+.app-sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--muted);
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.app-sidebar-nav-item:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.app-sidebar-nav-item-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.workflow-canvas {
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+
+.workflow-canvas-surface {
+  background: var(--background);
+}
+
+.workflow-canvas .react-flow {
+  width: 100%;
+  height: 100%;
+}
+
+.workflow-canvas .react-flow__background {
+  z-index: 0;
+}
+
+.workflow-canvas .react-flow__pane {
+  background: transparent !important;
 }
 
 .workflow-handle-row {
@@ -552,11 +669,26 @@ html.dark .cl-userButtonPopoverFooter svg {
   height: 12px !important;
   flex-shrink: 0;
   border: 2px solid var(--accent) !important;
-  background: var(--background) !important;
+  background: var(--surface) !important;
 }
 
 .workflow-handle-dot:hover {
-  background: var(--accent-soft) !important;
+  transform: scale(1.1);
+}
+
+.workflow-handle-text {
+  border-color: var(--edge-text) !important;
+  background: #fff7ed !important;
+}
+
+.workflow-handle-image {
+  border-color: var(--edge-image) !important;
+  background: #eff6ff !important;
+}
+
+.workflow-handle-default {
+  border-color: var(--edge-default) !important;
+  background: #f0fdf4 !important;
 }
 
 .workflow-canvas .react-flow__node {
@@ -633,3 +765,83 @@ html.dark .cl-userButtonPopoverFooter svg {
   animation: workflow-edge-flow 0.8s linear infinite;
   filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.6));
 }
+
+/* ─── Magica-style workflow node cards ──────────────────────────────────────── */
+
+.workflow-node-card {
+  box-shadow:
+    0 1px 2px rgb(15 15 20 / 0.04),
+    0 4px 16px rgb(15 15 20 / 0.06);
+}
+
+.workflow-node-header-icon {
+  display: inline-flex;
+  height: 1.75rem;
+  width: 1.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  color: var(--muted);
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.workflow-node-header-icon:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.workflow-node-run-btn {
+  display: inline-flex;
+  height: 1.625rem;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 9999px;
+  background: #22c55e;
+  padding: 0 0.625rem;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: #ffffff;
+  transition: background-color 0.15s ease;
+}
+
+.workflow-node-run-btn:hover:not(:disabled) {
+  background: #16a34a;
+}
+
+.workflow-node-run-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.workflow-node-body .text-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.workflow-node-field,
+.workflow-node-card input:not([type="file"]),
+.workflow-node-card textarea {
+  border-color: var(--border-soft) !important;
+  background: #f8f8fa !important;
+  padding: 0.375rem 0.625rem !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.35 !important;
+  border-radius: 0.5rem !important;
+}
+
+.workflow-node-card input:not([type="file"]):focus,
+.workflow-node-card textarea:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px rgb(124 58 237 / 0.12) !important;
+}
+
+.app-sidebar {
+  background: #ffffff;
+}
+

@@ -1,12 +1,16 @@
 "use client";
 
 import { useMemo } from "react";
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import type { WorkflowSummaryDTO } from "@/types/workflow";
 import { WorkflowCard } from "./WorkflowCard";
 
 type WorkflowListProps = {
   workflows: WorkflowSummaryDTO[];
+  onCreate?: () => void;
+  isCreating?: boolean;
+  createDisabled?: boolean;
   onEdit: (workflow: WorkflowSummaryDTO) => void;
   onDelete: (id: string) => void;
   onDeleteFailed: (workflow: WorkflowSummaryDTO) => void;
@@ -14,6 +18,9 @@ type WorkflowListProps = {
 
 export function WorkflowList({
   workflows,
+  onCreate,
+  isCreating = false,
+  createDisabled = false,
   onEdit,
   onDelete,
   onDeleteFailed,
@@ -35,6 +42,17 @@ export function WorkflowList({
           <p className="text-body-sm text-muted">
             Create your first workflow to start building AI-powered automations.
           </p>
+          {onCreate ? (
+            <div className="pt-2">
+              <Button
+                type="button"
+                onClick={onCreate}
+                disabled={isCreating || createDisabled}
+              >
+                {isCreating ? "Creating..." : "Create workflow"}
+              </Button>
+            </div>
+          ) : null}
         </div>
       </Card>
     );

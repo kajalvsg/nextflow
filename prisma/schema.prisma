@@ -4,34 +4,35 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Workflow {
   id          String        @id @default(cuid())
   name        String
-  description String?
   userId      String
-  nodes     Json
-  edges     Json
-  status    String        @default("idle")
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  runs      WorkflowRun[]
+  nodes       Json
+  edges       Json
+  status      String        @default("idle")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @default(now()) @updatedAt
+  description String?
+  runs        WorkflowRun[]
 
   @@index([userId])
 }
 
 model WorkflowRun {
-  id         String           @id @default(cuid())
+  id         String          @id @default(cuid())
   workflowId String
   userId     String
   status     String
   scope      String
-  startedAt  DateTime         @default(now())
+  startedAt  DateTime        @default(now())
   endedAt    DateTime?
   durationMs Int?
-  workflow   Workflow         @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   executions NodeExecution[]
+  workflow   Workflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
   @@index([workflowId])
   @@index([userId])
@@ -53,4 +54,10 @@ model NodeExecution {
 
   @@index([runId])
   @@index([nodeId])
+}
+
+model playing_with_neon {
+  id    Int    @id @default(autoincrement())
+  name  String
+  value Float? @db.Real
 }

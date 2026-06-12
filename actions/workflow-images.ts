@@ -4,7 +4,7 @@ import { randomUUID } from "crypto";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { auth } from "@clerk/nextjs/server";
-import { db } from "@/lib/db";
+import { db, ensureDbReady } from "@/lib/db";
 import type { ImageUploadResult } from "@/lib/upload/image-upload";
 import { ALLOWED_IMAGE_MIME_TYPES } from "@/lib/upload/image-upload";
 
@@ -48,6 +48,7 @@ export async function uploadWorkflowImageAction(
   workflowId: string,
   formData: FormData,
 ): Promise<ImageUploadResult> {
+  await ensureDbReady();
   const userId = await requireUserId();
 
   const workflow = await db.workflow.findFirst({

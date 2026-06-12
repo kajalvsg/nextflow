@@ -1,23 +1,19 @@
-import { PrismaNeon } from "@prisma/adapter-neon";
-import { PrismaClient } from "@prisma/client";
-import { neonConfig } from "@neondatabase/serverless";
-import ws from "ws";
+import "server-only";
+
+import type { PGlite } from "@electric-sql/pglite";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient, type Prisma } from "@prisma/client";
+import { PrismaPGlite } from "pglite-prisma-adapter";
+import { getPgPoolConfig } from "@/lib/db/connection";
+import { isLocalDatabaseEnabled } from "@/lib/db/local-pglite";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
+  prismaMode: "local" | "remote" | undefined;
 };
 
-function createPrismaClient() {
-  const connectionString = process.env.DATABASE_URL;
-
-  if (!connectionString) {
-    throw new Error("DATABASE_URL environment variable is not set");
-  }
-
-  // WebSocket transport avoids TCP/5432 timeouts on restricted networks (Neon pooler).
-  neonConfig.webSocketConstructor = ws;
-
-  const adapter = new PrismaNeon({ connectionString });
+function createRemotePrismaClient(): PrismaClient {
+  const adapter = new PrismaPg(getPgPoolConfig());
 
   return new PrismaClient({
     adapter,
@@ -25,10 +21,77 @@ function createPrismaClient() {
   });
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient();
+function createLocalPrismaClient(pglite: PGlite): PrismaClient {
+  const adapter = new PrismaPGlite(
+    pglite,
+  ) as unknown as NonNullable<Prisma.PrismaClientOptions["adapter"]>;
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+  return new PrismaClient({
+    adapter,
+    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+  });
 }
+
+export function initializeLocalPrisma(pglite: PGlite): PrismaClient {
+  if (
+    globalForPrisma.prisma &&
+    globalForPrisma.prismaMode === "local"
+  ) {
+    return globalForPrisma.prisma;
+  }
+
+  const client = createLocalPrismaClient(pglite);
+  globalForPrisma.prisma = client;
+  globalForPrisma.prismaMode = "local";
+
+  if (process.env.NODE_ENV !== "production") {
+    globalForPrisma.prisma = client;
+  }
+
+  return client;
+}
+
+function getRemotePrismaClient(): PrismaClient {
+  if (
+    !globalForPrisma.prisma ||
+    globalForPrisma.prismaMode !== "remote"
+  ) {
+    globalForPrisma.prisma = createRemotePrismaClient();
+    globalForPrisma.prismaMode = "remote";
+  }
+
+  return globalForPrisma.prisma;
+}
+
+if (!isLocalDatabaseEnabled()) {
+  getRemotePrismaClient();
+}
+
+function getActivePrismaClient(): PrismaClient {
+  if (isLocalDatabaseEnabled()) {
+    if (!globalForPrisma.prisma || globalForPrisma.prismaMode !== "local") {
+      throw new Error(
+        "Local database is not ready. Call ensureDbReady() before using Prisma.",
+      );
+    }
+
+    return globalForPrisma.prisma;
+  }
+
+  return getRemotePrismaClient();
+}
+
+export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_target, property, receiver) {
+    const client = getActivePrismaClient();
+    const value = Reflect.get(client, property, receiver);
+
+    if (typeof value === "function") {
+      return value.bind(client);
+    }
+
+    return value;
+  },
+});
 
 export default prisma;
