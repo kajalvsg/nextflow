@@ -164,6 +164,8 @@ function parseGeminiProConfig(value: unknown): GeminiProConfig {
       typeof value.settingsOpen === "boolean"
         ? value.settingsOpen
         : defaults.settingsOpen,
+    jsonMode:
+      typeof value.jsonMode === "boolean" ? value.jsonMode : defaults.jsonMode,
     temperature:
       typeof value.temperature === "number"
         ? value.temperature

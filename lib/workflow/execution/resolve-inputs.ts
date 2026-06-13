@@ -40,7 +40,7 @@ function getIncomingEdges(nodeId: string, edges: Edge[]): Edge[] {
   return edges.filter((edge) => edge.target === nodeId);
 }
 
-function resolveHandleValue(
+export function resolveHandleValue(
   sourceNodeId: string,
   sourceHandle: string | null | undefined,
   outputs: NodeOutputMap,
@@ -52,6 +52,92 @@ function resolveHandleValue(
   }
 
   return sourceOutput[sourceHandle] ?? null;
+}
+
+function resolveTextFromEdges(
+  nodeId: string,
+  targetHandle: string,
+  edges: Edge[],
+  outputs: NodeOutputMap,
+  nodes: Node<WorkflowNodeData>[],
+): string {
+  const incoming = getIncomingEdges(nodeId, edges)
+    .map((edge) => normalizeEdgeForResolution(edge, nodes))
+    .filter((edge) => edge.targetHandle === targetHandle);
+
+  const parts = incoming
+    .map((edge) => {
+      const value = resolveHandleValue(
+        edge.source,
+        edge.sourceHandle,
+        outputs,
+      );
+
+      return typeof value === "string" ? value.trim() : "";
+    })
+    .filter(Boolean);
+
+  return parts.join("\n\n");
+}
+
+export function resolveAllImagesFromEdges(
+  nodeId: string,
+  targetHandle: string,
+  edges: Edge[],
+  outputs: NodeOutputMap,
+  nodes: Node<WorkflowNodeData>[],
+): string[] {
+  const incoming = getIncomingEdges(nodeId, edges)
+    .map((edge) => normalizeEdgeForResolution(edge, nodes))
+    .filter((edge) => edge.targetHandle === targetHandle);
+
+  const urls: string[] = [];
+
+  for (const edge of incoming) {
+    const url = resolveImageInputFromEdge(edge, outputs, nodes);
+
+    if (url) {
+      urls.push(url);
+    }
+  }
+
+  return urls;
+}
+
+export function countIncomingImageEdges(
+  nodeId: string,
+  targetHandle: string,
+  edges: Edge[],
+  nodes: Node<WorkflowNodeData>[],
+): number {
+  return getIncomingEdges(nodeId, edges)
+    .map((edge) => normalizeEdgeForResolution(edge, nodes))
+    .filter((edge) => edge.targetHandle === targetHandle).length;
+}
+
+/** Returns how many connected image edges still lack a resolved value. */
+export function countMissingConnectedImages(
+  nodeId: string,
+  targetHandle: string,
+  edges: Edge[],
+  outputs: NodeOutputMap,
+  nodes: Node<WorkflowNodeData>[],
+): number {
+  const expected = countIncomingImageEdges(nodeId, targetHandle, edges, nodes);
+
+  if (expected === 0) {
+    return 0;
+  }
+
+  const resolved = resolveAllImagesFromEdges(
+    nodeId,
+    targetHandle,
+    edges,
+    outputs,
+    nodes,
+  ).length;
+
+  return Math.max(0, expected - resolved);
 }
 
 export function resolveCropImageInput(
@@ -75,33 +161,36 @@ export function resolveGeminiInput(
   outputs: NodeOutputMap,
   nodes: Node<WorkflowNodeData>[],
 ): Record<string, unknown> {
-  const incoming = getIncomingEdges(nodeId, edges).map((edge) =>
-    normalizeEdgeForResolution(edge, nodes),
-  );
-  const promptEdge = incoming.find((edge) => edge.targetHandle === "prompt");
-  const systemEdge = incoming.find(
-    (edge) => edge.targetHandle === "system_prompt",
-  );
-  const visionEdge = incoming.find(
-    (edge) => edge.targetHandle === "image_vision",
+  const imageUrls = resolveAllImagesFromEdges(
+    nodeId,
+    "image_vision",
+    edges,
+    outputs,
+    nodes,
   );
 
   return {
-    prompt: promptEdge
-      ? resolveHandleValue(promptEdge.source, promptEdge.sourceHandle, outputs)
-      : "",
-    system_prompt: systemEdge
-      ? resolveHandleValue(systemEdge.source, systemEdge.sourceHandle, outputs)
-      : "",
-    image_vision: resolveImageInputFromEdge(visionEdge, outputs, nodes),
+    prompt: resolveTextFromEdges(nodeId, "prompt", edges, outputs, nodes),
+    system_prompt: resolveTextFromEdges(
+      nodeId,
+      "system_prompt",
+      edges,
+      outputs,
+      nodes,
+    ),
+    image_vision: imageUrls[0] ?? null,
+    image_vision_urls: imageUrls,
   };
 }
 
 export function resolveResponseInput(
   edges: Edge[],
   outputs: NodeOutputMap,
+  nodes: Node<WorkflowNodeData>[],
 ): Record<string, unknown> {
-  const incoming = edges.find((edge) => edge.target === "response");
+  const incoming = edges
+    .filter((edge) => edge.target === "response")
+    .map((edge) => normalizeEdgeForResolution(edge, nodes))[0];
 
   if (!incoming) {
     return { result: null };
@@ -141,8 +230,28 @@ export function buildNodeInputRecord(
       };
     }
     case "response":
-      return resolveResponseInput(edges, outputs);
+      return resolveResponseInput(edges, outputs, nodes);
     default:
       return {};
+  }
+}
+
+export function logPropagatedOutputs(
+  sourceNodeId: string,
+  edges: Edge[],
+  nodes: Node<WorkflowNodeData>[],
+): void {
+  for (const edge of edges) {
+    if (edge.source !== sourceNodeId) {
+      continue;
+    }
+
+    const normalized = normalizeEdgeForResolution(edge, nodes);
+    const targetHandle = normalized.targetHandle ?? "input";
+    const sourceHandle = normalized.sourceHandle ?? "output";
+
+    console.info(
+      `[workflow-orchestrator] propagated output ${sourceHandle} -> ${normalized.target}.${targetHandle}`,
+    );
   }
 }

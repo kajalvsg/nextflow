@@ -38,6 +38,7 @@ export type CropImageConfig = {
 
 export type GeminiProConfig = {
   settingsOpen: boolean;
+  jsonMode: boolean;
   temperature: number;
   maxOutputTokens: number;
   prompt: string;

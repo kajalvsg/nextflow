@@ -12,6 +12,15 @@ import type {
 } from "@/types/workflow-execution";
 import { pollServerAction } from "@/lib/utils/poll-server-action";
 import { cn } from "@/lib/utils/cn";
+import {
+  WorkflowHistoryRunDetails,
+  formatHistoryDuration,
+  formatHistoryRunStatusLabel,
+  formatHistoryRunTimestampShort,
+  formatHistoryScopeLabel,
+  getHistoryRunNumber,
+  getRunStatusBadgeClass,
+} from "./WorkflowHistoryRunDetails";
 
 type WorkflowHistoryPanelProps = {
   workflowId: string;
@@ -41,70 +50,6 @@ const FILTER_OPTIONS: { value: HistoryFilter; label: string }[] = [
   { value: "failed", label: "Failed" },
   { value: "canceled", label: "Canceled" },
 ];
-
-function formatDuration(durationMs: number | null): string {
-  if (durationMs == null) {
-    return "—";
-  }
-
-  if (durationMs < 1000) {
-    return `${durationMs}ms`;
-  }
-
-  return `${(durationMs / 1000).toFixed(1)}s`;
-}
-
-function formatTimestamp(value: string): string {
-  return new Date(value).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function formatScope(scope: WorkflowRunSummary["scope"]): string {
-  switch (scope) {
-    case "full":
-      return "Full workflow";
-    case "single":
-      return "Single node";
-    case "partial":
-      return "Partial run";
-    default:
-      return scope;
-  }
-}
-
-function getStatusLabel(status: WorkflowRunSummary["status"]): string {
-  switch (status) {
-    case "success":
-      return "Completed";
-    case "failed":
-      return "Failed";
-    case "running":
-      return "Running";
-    case "partial":
-      return "Partial";
-    default:
-      return status;
-  }
-}
-
-function getStatusBadgeClass(status: WorkflowRunSummary["status"]): string {
-  switch (status) {
-    case "success":
-      return "workflow-history-status-completed";
-    case "failed":
-      return "workflow-history-status-failed";
-    case "running":
-      return "workflow-history-status-running";
-    case "partial":
-      return "workflow-history-status-waiting";
-    default:
-      return "workflow-history-status-default";
-  }
-}
 
 function matchesFilter(
   run: WorkflowRunSummary,
@@ -430,6 +375,7 @@ export function WorkflowHistoryPanel({
           <ul className="flex flex-col gap-2.5">
             {visibleRuns.map((run) => {
               const isExpanded = expandedRunId === run.id;
+              const runNumber = getHistoryRunNumber(runs, run.id);
 
               return (
                 <li key={run.id} className="workflow-history-run-card">
@@ -445,71 +391,41 @@ export function WorkflowHistoryPanel({
                     )}
 
                     <div className="min-w-0 flex-1">
-                      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                      <p className="workflow-history-run-number">
+                        Run #{runNumber}
+                      </p>
+
+                      <div className="mb-2 mt-1.5 flex flex-wrap items-center gap-1.5">
                         <span
                           className={cn(
                             "workflow-history-status-badge",
-                            getStatusBadgeClass(run.status),
+                            getRunStatusBadgeClass(run.status),
                           )}
                         >
-                          {getStatusLabel(run.status)}
+                          {formatHistoryRunStatusLabel(run.status)}
                         </span>
                         <span className="workflow-history-scope-badge">
-                          {formatScope(run.scope)}
+                          {formatHistoryScopeLabel(run.scope)}
                         </span>
                       </div>
 
                       <p className="workflow-history-run-meta">
-                        {formatTimestamp(run.startedAt)}
+                        {formatHistoryRunTimestampShort(run.startedAt)}
                       </p>
                       <p className="workflow-history-run-meta">
-                        {formatDuration(run.durationMs)} · {run.executionCount}{" "}
+                        {formatHistoryDuration(run.durationMs)} ·{" "}
+                        {run.executionCount}{" "}
                         {run.executionCount === 1 ? "node" : "nodes"}
                       </p>
                     </div>
                   </button>
 
                   {isExpanded && expandedDetail?.id === run.id ? (
-                    <div className="border-t border-border-soft px-3 pb-3 pt-2">
-                      <ul className="flex flex-col gap-2">
-                        {expandedDetail.executions.map((execution) => (
-                          <li
-                            key={execution.id}
-                            className="workflow-history-node-card"
-                          >
-                            <div className="mb-1 flex items-center justify-between gap-2">
-                              <p className="workflow-history-node-name">
-                                {execution.nodeName}
-                              </p>
-                              <span
-                                className={cn(
-                                  "workflow-history-status-badge",
-                                  getStatusBadgeClass(
-                                    execution.status === "success"
-                                      ? "success"
-                                      : execution.status === "failed"
-                                        ? "failed"
-                                        : execution.status === "running"
-                                          ? "running"
-                                          : "partial",
-                                  ),
-                                )}
-                              >
-                                {execution.status}
-                              </span>
-                            </div>
-                            <p className="workflow-history-run-meta">
-                              {execution.nodeType} ·{" "}
-                              {formatDuration(execution.durationMs)}
-                            </p>
-                            {execution.error ? (
-                              <p className="mt-1 text-[11px] leading-4 text-red-500">
-                                {execution.error}
-                              </p>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
+                    <div className="workflow-history-run-expanded-wrap border-t border-border-soft">
+                      <WorkflowHistoryRunDetails
+                        run={expandedDetail}
+                        runNumber={runNumber}
+                      />
                     </div>
                   ) : null}
                 </li>

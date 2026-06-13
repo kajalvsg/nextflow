@@ -9,6 +9,7 @@ import type { GeminiProConfig, WorkflowNodeData } from "@/types/workflow-canvas"
 import { useWorkflowBuilder } from "../WorkflowBuilderContext";
 import { NodeCardShell } from "./NodeCardShell";
 import { NodeInputField } from "./NodeInputField";
+import { NodeJsonModeSettingRow } from "./NodeJsonModeSettingRow";
 import { NodeOutputPreview } from "./NodeOutputPreview";
 import { NodeUploadInputRow } from "./NodeUploadInputRow";
 
@@ -25,6 +26,7 @@ export function GeminiProNode({
     updateNodeData,
     getNodeExecutionStatus,
     getNodeInlineExecution,
+    getConnectedInput,
     isTargetHandleConnected,
     autoConnectHandle,
   } = useWorkflowBuilder();
@@ -36,6 +38,27 @@ export function GeminiProNode({
   const promptConnected = isTargetHandleConnected(id, "prompt");
   const systemPromptConnected = isTargetHandleConnected(id, "system_prompt");
   const imageVisionConnected = isTargetHandleConnected(id, "image_vision");
+
+  const promptResolved = getConnectedInput(id, "prompt");
+  const systemPromptResolved = getConnectedInput(id, "system_prompt");
+  const imageVisionResolved = getConnectedInput(id, "image_vision");
+
+  const promptValue =
+    promptConnected && promptResolved?.status === "ready"
+      ? (promptResolved.text ?? "")
+      : config.prompt;
+  const systemPromptValue =
+    systemPromptConnected && systemPromptResolved?.status === "ready"
+      ? (systemPromptResolved.text ?? "")
+      : config.systemPrompt;
+  const promptHint =
+    promptConnected && promptResolved?.status !== "ready"
+      ? promptResolved?.hint ?? "Connected — waiting for upstream output."
+      : null;
+  const systemPromptHint =
+    systemPromptConnected && systemPromptResolved?.status !== "ready"
+      ? systemPromptResolved?.hint ?? "Connected — waiting for upstream output."
+      : null;
 
   const updateConfig = (patch: Partial<GeminiProConfig>) => {
     updateNodeData(id, (current) => ({
@@ -64,8 +87,9 @@ export function GeminiProNode({
           handleId="prompt"
           handleType="target"
           placeholder="Enter your prompt..."
-          value={config.prompt}
+          value={promptValue}
           connected={promptConnected}
+          connectedHint={promptHint}
           disabled={promptConnected}
           minRows={1}
           onChange={(value) => updateConfig({ prompt: value })}
@@ -78,8 +102,9 @@ export function GeminiProNode({
           handleId="system_prompt"
           handleType="target"
           placeholder="You are a helpful assistant..."
-          value={config.systemPrompt}
+          value={systemPromptValue}
           connected={systemPromptConnected}
+          connectedHint={systemPromptHint}
           disabled={systemPromptConnected}
           minRows={1}
           onChange={(value) => updateConfig({ systemPrompt: value })}
@@ -93,6 +118,13 @@ export function GeminiProNode({
           handleId="image_vision"
           connected={imageVisionConnected}
           connectedText="Image input connected"
+          connectedImages={imageVisionResolved?.images ?? []}
+          connectedImageKind={imageVisionResolved?.imageKind}
+          connectedHint={
+            imageVisionConnected && imageVisionResolved?.status !== "ready"
+              ? imageVisionResolved?.hint ?? "Connected — waiting for upstream output."
+              : null
+          }
           onAddConnection={() => autoConnectHandle(id, "image_vision")}
           disabled
         />
@@ -102,6 +134,7 @@ export function GeminiProNode({
           label="Video"
           buttonLabel="Upload video"
           decorativeColor="green"
+          onAddConnection={() => autoConnectHandle(id, "video")}
           disabled
         />
 
@@ -110,6 +143,7 @@ export function GeminiProNode({
           label="Audio"
           buttonLabel="Upload audio"
           decorativeColor="cyan"
+          onAddConnection={() => autoConnectHandle(id, "audio")}
           disabled
         />
 
@@ -118,6 +152,7 @@ export function GeminiProNode({
           label="File"
           buttonLabel="Upload file"
           decorativeColor="purple"
+          onAddConnection={() => autoConnectHandle(id, "file")}
           disabled
         />
 
@@ -137,8 +172,14 @@ export function GeminiProNode({
         </button>
 
         {config.settingsOpen ? (
-          <div className="grid grid-cols-2 gap-1.5">
-            <Input
+          <div className="workflow-node-settings-panel workflow-node-settings-panel-dense">
+            <NodeJsonModeSettingRow
+              value={config.jsonMode}
+              onChange={(jsonMode) => updateConfig({ jsonMode })}
+              onAddConnection={() => autoConnectHandle(id, "json_mode")}
+            />
+            <div className="grid grid-cols-2 gap-1.5">
+              <Input
               label="Temperature"
               type="number"
               min={0}
@@ -162,6 +203,7 @@ export function GeminiProNode({
                 updateConfig({ maxOutputTokens: Number(event.target.value) })
               }
             />
+            </div>
           </div>
         ) : null}
 

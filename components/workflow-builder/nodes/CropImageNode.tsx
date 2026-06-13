@@ -13,11 +13,13 @@ export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData
     updateNodeData,
     getNodeExecutionStatus,
     getNodeInlineExecution,
+    getConnectedInput,
     isTargetHandleConnected,
     autoConnectHandle,
   } = useWorkflowBuilder();
   const config = data.config as CropImageConfig;
   const inputImageConnected = isTargetHandleConnected(id, "input_image");
+  const inputImageResolved = getConnectedInput(id, "input_image");
 
   const updateConfig = (patch: Partial<CropImageConfig>) => {
     updateNodeData(id, (current) => ({
@@ -46,6 +48,13 @@ export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData
           handleId="input_image"
           connected={inputImageConnected}
           connectedText="Image input connected"
+          connectedImages={inputImageResolved?.images ?? []}
+          connectedImageKind={inputImageResolved?.imageKind}
+          connectedHint={
+            inputImageConnected && inputImageResolved?.status !== "ready"
+              ? inputImageResolved?.hint ?? "Connected — waiting for upstream output."
+              : null
+          }
           onAddConnection={() => autoConnectHandle(id, "input_image")}
           disabled
         />

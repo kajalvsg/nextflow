@@ -55,6 +55,12 @@ import {
 } from "@/lib/workflow/history";
 import { findAutoConnectSource } from "@/lib/workflow/auto-connect";
 import {
+  applyMagicaAutoConnectToNodes,
+  getUnsupportedMagicaToast,
+  isGeminiMagicaTargetHandle,
+  planMagicaAutoConnect,
+} from "@/lib/workflow/magica-auto-connect";
+import {
   createAddableNode,
   createWorkflowNodeId,
 } from "@/lib/workflow/node-registry";
@@ -67,6 +73,10 @@ import {
   STICKY_NOTE_NODE_TYPE,
   type StickyNoteNode as StickyNoteNodeModel,
 } from "@/lib/workflow/sticky-notes-storage";
+import {
+  buildConnectedInputMap,
+  getConnectedInputValue,
+} from "@/lib/workflow/execution/connected-inputs";
 import type {
   AddableWorkflowNodeType,
   WorkflowBuilderDTO,
@@ -1568,6 +1578,87 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
   const autoConnectHandle = useCallback(
     (nodeId: string, targetHandle: string) => {
+      if (
+        isTargetHandleConnected(nodeId, targetHandle, edgesRef.current)
+      ) {
+        showToast("This input is already connected.");
+        return;
+      }
+
+      if (isGeminiMagicaTargetHandle(targetHandle)) {
+        const unsupportedToast = getUnsupportedMagicaToast(targetHandle);
+
+        if (unsupportedToast) {
+          showToast(unsupportedToast);
+          return;
+        }
+
+        const result = planMagicaAutoConnect(
+          nodeId,
+          targetHandle,
+          nodesRef.current,
+        );
+
+        if (result.kind === "no_request_inputs") {
+          showToast("Request-Inputs node not found.");
+          return;
+        }
+
+        if (result.kind !== "plan") {
+          showToast("Unable to create input connection.");
+          return;
+        }
+
+        const nextNodes = applyMagicaAutoConnectToNodes(
+          nodesRef.current,
+          result.plan,
+        );
+        const validation = validateWorkflowConnection(
+          result.plan.connection,
+          nextNodes,
+          edgesRef.current,
+        );
+
+        if (!validation.valid) {
+          showToast(validation.reason ?? "Invalid connection.");
+          return;
+        }
+
+        recordHistory();
+
+        setNodes((current) => {
+          const next = applyMagicaAutoConnectToNodes(current, result.plan).map(
+            (node) => ({ ...node, selected: false }),
+          );
+          nodesRef.current = next;
+          return next;
+        });
+
+        setEdges((current) => {
+          const next = addEdge(
+            {
+              ...result.plan.connection,
+              animated: false,
+              style: {
+                stroke: getEdgeStrokeColor(result.plan.connection.sourceHandle),
+                strokeWidth: 2,
+              },
+            },
+            current,
+          );
+          const newestEdge = next[next.length - 1];
+          const withSelection = next.map((edge) => ({
+            ...edge,
+            selected: newestEdge ? edge.id === newestEdge.id : false,
+          }));
+          edgesRef.current = withSelection;
+          scheduleSave();
+          return withSelection;
+        });
+
+        return;
+      }
+
       const connection = findAutoConnectSource(
         nodeId,
         targetHandle,
@@ -1582,7 +1673,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
       onConnect(connection);
     },
-    [onConnect, showToast],
+    [onConnect, recordHistory, scheduleSave, showToast],
   );
 
   const isSourceConnected = useCallback(
@@ -1606,6 +1697,17 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     (nodeId: string): NodeInlineExecutionState | null =>
       nodeInlineExecutions[nodeId] ?? null,
     [nodeInlineExecutions],
+  );
+
+  const connectedInputMap = useMemo(
+    () => buildConnectedInputMap(nodes, edges, {}, nodeInlineExecutions),
+    [nodes, edges, nodeInlineExecutions],
+  );
+
+  const getConnectedInput = useCallback(
+    (nodeId: string, targetHandle: string) =>
+      getConnectedInputValue(connectedInputMap, nodeId, targetHandle),
+    [connectedInputMap],
   );
 
   const reloadInlineExecutions = useCallback(async () => {
@@ -1956,6 +2058,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       isTargetHandleConnected: isTargetConnected,
       getNodeExecutionStatus,
       getNodeInlineExecution,
+      getConnectedInput,
       isWorkflowRunning,
       runNode,
       removeEdge,
@@ -1978,6 +2081,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       isTargetConnected,
       getNodeExecutionStatus,
       getNodeInlineExecution,
+      getConnectedInput,
       isWorkflowRunning,
       runNode,
       removeEdge,

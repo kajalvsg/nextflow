@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from "react";
 import type { StickyNoteNodeData } from "@/lib/workflow/sticky-notes-storage";
+import type { ConnectedInputValue } from "@/lib/workflow/execution/connected-inputs";
 import type { WorkflowNodeData } from "@/types/workflow-canvas";
 import type { NodeInlineExecutionState, NodeRuntimeStatus } from "@/types/workflow-execution";
 
@@ -20,6 +21,10 @@ type WorkflowBuilderContextValue = {
   isTargetHandleConnected: (nodeId: string, handleId: string) => boolean;
   getNodeExecutionStatus: (nodeId: string) => NodeRuntimeStatus;
   getNodeInlineExecution: (nodeId: string) => NodeInlineExecutionState | null;
+  getConnectedInput: (
+    nodeId: string,
+    targetHandle: string,
+  ) => ConnectedInputValue | null;
   isWorkflowRunning: boolean;
   runNode: (nodeId: string) => void;
   removeEdge: (edgeId: string) => void;

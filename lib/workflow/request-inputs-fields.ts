@@ -74,13 +74,30 @@ export function fieldIdFromLabel(
   return `${candidate}_${index}`;
 }
 
-export function createRequestInputField(
-  type: RequestFieldType,
+export function createUniqueRequestFieldId(
+  base: string,
   existingIds: Iterable<string>,
+): string {
+  const used = new Set(existingIds);
+
+  if (!used.has(base)) {
+    return base;
+  }
+
+  let index = 2;
+
+  while (used.has(`${base}_${index}`)) {
+    index += 1;
+  }
+
+  return `${base}_${index}`;
+}
+
+export function createRequestInputFieldWithId(
+  type: RequestFieldType,
+  id: string,
   label?: string,
 ): RequestInputField {
-  const id = createRequestFieldId(type, existingIds);
-
   return {
     id,
     label: label ?? id,
@@ -89,6 +106,16 @@ export function createRequestInputField(
       ? { textValue: "" }
       : { imageValue: defaultImageFieldState() }),
   };
+}
+
+export function createRequestInputField(
+  type: RequestFieldType,
+  existingIds: Iterable<string>,
+  label?: string,
+): RequestInputField {
+  const id = createRequestFieldId(type, existingIds);
+
+  return createRequestInputFieldWithId(type, id, label ?? id);
 }
 
 function parseImageFieldState(value: unknown): ImageFieldState {

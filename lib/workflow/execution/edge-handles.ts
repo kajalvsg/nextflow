@@ -3,6 +3,7 @@ import {
   findFirstRequestFieldId,
   normalizeRequestInputsConfig,
 } from "@/lib/workflow/request-inputs-fields";
+import { normalizeImageSourceHandle } from "@/lib/workflow/execution/image-input";
 import type { WorkflowNodeData } from "@/types/workflow-canvas";
 
 function getNodeType(
@@ -52,6 +53,10 @@ export function normalizeEdgeForResolution(
 
   if (!sourceHandle && sourceType === "cropImage") {
     sourceHandle = "output_image";
+  }
+
+  if (sourceType === "cropImage" && sourceHandle) {
+    sourceHandle = normalizeImageSourceHandle(sourceHandle) ?? sourceHandle;
   }
 
   if (!sourceHandle && sourceType === "geminiPro") {

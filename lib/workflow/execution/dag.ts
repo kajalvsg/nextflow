@@ -172,3 +172,90 @@ export function getReadyExecutableNodes(
     return true;
   });
 }
+
+export type NodeDependencyStatus = "ready" | "waiting" | "blocked";
+
+export function getNodeDependencyStatus(
+  nodeId: string,
+  successfulNodeIds: Set<string>,
+  failedNodeIds: Set<string>,
+  edges: Edge[],
+  plannedNodeIds: Set<string>,
+): NodeDependencyStatus {
+  const upstreamMap = buildUpstreamMap(edges);
+  const upstream = upstreamMap.get(nodeId) ?? new Set<string>();
+
+  for (const parentId of upstream) {
+    if (!plannedNodeIds.has(parentId)) {
+      continue;
+    }
+
+    if (failedNodeIds.has(parentId)) {
+      return "blocked";
+    }
+
+    if (!successfulNodeIds.has(parentId)) {
+      return "waiting";
+    }
+  }
+
+  return "ready";
+}
+
+/**
+ * Assign planned nodes to dependency levels. Nodes in the same level can run
+ * in parallel once every upstream node is in an earlier level.
+ */
+export function computeExecutionLevels(
+  plannedNodeIds: Set<string>,
+  edges: Edge[],
+): string[][] {
+  const upstreamMap = buildUpstreamMap(edges);
+  const planned = [...plannedNodeIds];
+  const assigned = new Set<string>();
+  const levels: string[][] = [];
+
+  while (assigned.size < planned.length) {
+    const level: string[] = [];
+
+    for (const nodeId of planned) {
+      if (assigned.has(nodeId)) {
+        continue;
+      }
+
+      const upstream = upstreamMap.get(nodeId) ?? new Set<string>();
+      const parentsReady = [...upstream].every(
+        (parentId) =>
+          !plannedNodeIds.has(parentId) || assigned.has(parentId),
+      );
+
+      if (parentsReady) {
+        level.push(nodeId);
+      }
+    }
+
+    if (level.length === 0) {
+      const remaining = planned.filter((nodeId) => !assigned.has(nodeId));
+
+      if (remaining.length === 0) {
+        break;
+      }
+
+      levels.push(remaining);
+
+      for (const nodeId of remaining) {
+        assigned.add(nodeId);
+      }
+
+      break;
+    }
+
+    levels.push(level);
+
+    for (const nodeId of level) {
+      assigned.add(nodeId);
+    }
+  }
+
+  return levels;
+}

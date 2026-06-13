@@ -51,6 +51,7 @@ export function defaultCropImageConfig(): CropImageConfig {
 export function defaultGeminiProConfig(): GeminiProConfig {
   return {
     settingsOpen: false,
+    jsonMode: false,
     temperature: 0.7,
     maxOutputTokens: 8192,
     prompt: "",

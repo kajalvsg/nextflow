@@ -334,28 +334,25 @@ function RequestInputFieldRow({
               </button>
             )}
 
-            <input
-              type="url"
-              placeholder="Or paste image URL..."
-              value={
-                savedImage.fileUrl &&
-                !savedImage.fileUrl.startsWith("blob:")
-                  ? savedImage.fileUrl
-                  : ""
-              }
-              disabled={isUploading}
-              onChange={(event) => {
-                const url = event.target.value.trim();
-                onImageChange(field.id, {
-                  fileName: url ? "Image URL" : null,
-                  fileUrl: url || null,
-                  mimeType: null,
-                  size: null,
-                });
-              }}
-              onPointerDown={stopNodePointer}
-              className="workflow-node-prompt-field mt-2 w-full px-2 py-1.5 text-[11px]"
-            />
+            {!showPreview ? (
+              <input
+                type="url"
+                placeholder="Or paste image URL..."
+                value=""
+                disabled={isUploading}
+                onChange={(event) => {
+                  const url = event.target.value.trim();
+                  onImageChange(field.id, {
+                    fileName: url ? "Image URL" : null,
+                    fileUrl: url || null,
+                    mimeType: null,
+                    size: null,
+                  });
+                }}
+                onPointerDown={stopNodePointer}
+                className="workflow-node-prompt-field mt-2 w-full px-2 py-1.5 text-[11px]"
+              />
+            ) : null}
 
             {uploadErrorMessage ? (
               <p className="mt-1 text-[10px] text-red-500">

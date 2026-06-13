@@ -10,11 +10,54 @@ import type { WorkflowNodeData } from "@/types/workflow-canvas";
 
 export const IMAGE_SOURCE_HANDLES = new Set(["image_field", "output_image"]);
 
+export const CROP_OUTPUT_IMAGE_KEYS = [
+  "output_image",
+  "outputImage",
+  "output-image",
+] as const;
+
 export const CROP_IMAGE_INPUT_ERROR =
   "Crop Image requires a valid uploaded image or image URL.";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getSourceNodeType(
+  nodes: Node<WorkflowNodeData>[],
+  sourceNodeId: string,
+): WorkflowNodeData["nodeType"] | null {
+  return nodes.find((item) => item.id === sourceNodeId)?.data.nodeType ?? null;
+}
+
+export function normalizeImageSourceHandle(
+  handleId: string | null | undefined,
+): string | null {
+  if (typeof handleId !== "string") {
+    return null;
+  }
+
+  const trimmed = handleId.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (
+    trimmed === "output_image" ||
+    trimmed === "outputImage" ||
+    trimmed === "output-image"
+  ) {
+    return "output_image";
+  }
+
+  return trimmed;
+}
+
+export function isOutputImageHandle(
+  handleId: string | null | undefined,
+): boolean {
+  return normalizeImageSourceHandle(handleId) === "output_image";
 }
 
 export function isImageSourceHandle(
@@ -26,7 +69,7 @@ export function isImageSourceHandle(
     return false;
   }
 
-  if (handleId === "output_image") {
+  if (isOutputImageHandle(handleId)) {
     return true;
   }
 
@@ -36,6 +79,10 @@ export function isImageSourceHandle(
     if (node?.data.nodeType === "requestInputs") {
       const config = normalizeRequestInputsConfig(node.data.config);
       return isRequestInputsImageHandle(config, handleId);
+    }
+
+    if (node?.data.nodeType === "cropImage") {
+      return false;
     }
   }
 
@@ -85,17 +132,38 @@ export function normalizeImageInputUrl(value: unknown): string | null {
   return null;
 }
 
+export function readCropOutputImage(
+  sourceOutput: Record<string, unknown>,
+): string | null {
+  for (const key of CROP_OUTPUT_IMAGE_KEYS) {
+    const normalized = normalizeImageInputUrl(sourceOutput[key]);
+
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
 function readImageFromOutputRecord(
   sourceOutput: Record<string, unknown>,
   sourceHandle: string,
 ): string | null {
-  const direct = normalizeImageInputUrl(sourceOutput[sourceHandle]);
+  const normalizedHandle =
+    normalizeImageSourceHandle(sourceHandle) ?? sourceHandle;
+
+  if (isOutputImageHandle(normalizedHandle)) {
+    return readCropOutputImage(sourceOutput);
+  }
+
+  const direct = normalizeImageInputUrl(sourceOutput[normalizedHandle]);
 
   if (direct) {
     return direct;
   }
 
-  const meta = sourceOutput[`${sourceHandle}_meta`];
+  const meta = sourceOutput[`${normalizedHandle}_meta`];
 
   if (isRecord(meta)) {
     const fromMeta = normalizeImageInputUrl(meta.fileUrl);
@@ -135,25 +203,40 @@ export function resolveImageValue(
   outputs: NodeOutputMap,
   nodes: Node<WorkflowNodeData>[],
 ): string | null {
-  if (!sourceHandle) {
+  const normalizedHandle = normalizeImageSourceHandle(sourceHandle);
+
+  if (!normalizedHandle) {
     return null;
   }
 
-  if (!isImageSourceHandle(sourceHandle, nodes, sourceNodeId)) {
+  if (!isImageSourceHandle(normalizedHandle, nodes, sourceNodeId)) {
     return null;
   }
 
+  const sourceNodeType = getSourceNodeType(nodes, sourceNodeId);
   const sourceOutput = outputs.get(sourceNodeId);
 
+  if (sourceNodeType === "cropImage") {
+    if (!isOutputImageHandle(normalizedHandle)) {
+      return null;
+    }
+
+    if (!sourceOutput) {
+      return null;
+    }
+
+    return readCropOutputImage(sourceOutput);
+  }
+
   if (sourceOutput) {
-    const fromOutput = readImageFromOutputRecord(sourceOutput, sourceHandle);
+    const fromOutput = readImageFromOutputRecord(sourceOutput, normalizedHandle);
 
     if (fromOutput) {
       return fromOutput;
     }
   }
 
-  return readImageFromNodeConfig(sourceNodeId, sourceHandle, nodes);
+  return readImageFromNodeConfig(sourceNodeId, normalizedHandle, nodes);
 }
 
 export function resolveImageInputFromEdge(
@@ -165,6 +248,12 @@ export function resolveImageInputFromEdge(
     return null;
   }
 
+  const normalizedHandle = normalizeImageSourceHandle(incoming.sourceHandle);
+
+  if (!normalizedHandle) {
+    return null;
+  }
+
   if (!nodes) {
     const sourceOutput = outputs.get(incoming.source);
 
@@ -172,12 +261,16 @@ export function resolveImageInputFromEdge(
       return null;
     }
 
-    return readImageFromOutputRecord(sourceOutput, incoming.sourceHandle);
+    if (isOutputImageHandle(normalizedHandle)) {
+      return readCropOutputImage(sourceOutput);
+    }
+
+    return readImageFromOutputRecord(sourceOutput, normalizedHandle);
   }
 
   return resolveImageValue(
     incoming.source,
-    incoming.sourceHandle,
+    normalizedHandle,
     outputs,
     nodes,
   );

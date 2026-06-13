@@ -1,9 +1,9 @@
-import { task } from "@trigger.dev/sdk/v3";
+import { batch, task } from "@trigger.dev/sdk/v3";
 import { parseStoredGraph } from "@/lib/workflow/canvas";
 import {
-  EXECUTABLE_NODE_TYPES,
   LOCAL_NODE_TYPES,
-  getReadyExecutableNodes,
+  computeExecutionLevels,
+  getNodeDependencyStatus,
 } from "@/lib/workflow/execution/dag";
 import {
   GEMINI_DEMO_FALLBACK_RESPONSE,
@@ -16,10 +16,15 @@ import {
   logGeminiDebug,
   logGeminiEnvSnapshot,
 } from "@/lib/workflow/execution/gemini-debug";
-import { assertCropImageInputUrl, requireCropImageInputUrl } from "@/lib/workflow/execution/image-input";
+import {
+  assertCropImageInputUrl,
+  requireCropImageInputUrl,
+} from "@/lib/workflow/execution/image-input";
 import { buildLocalNodeOutput } from "@/lib/workflow/execution/local-nodes";
 import {
   buildNodeInputRecord,
+  countMissingConnectedImages,
+  logPropagatedOutputs,
   type NodeOutputMap,
 } from "@/lib/workflow/execution/resolve-inputs";
 import {
@@ -32,19 +37,9 @@ import {
 } from "@/lib/workflow/execution/run-store";
 import { db, ensureDbReady } from "@/lib/db";
 import type { RunScope, RunStatus } from "@/types/workflow-execution";
-import type { WorkflowNodeData, WorkflowNodeType } from "@/types/workflow-canvas";
+import type { WorkflowNodeData } from "@/types/workflow-canvas";
 import { cropImageTask } from "./crop-image";
 import { geminiProTask } from "./gemini-pro";
-
-function findPlannedNodeId(
-  nodes: Array<{ id: string; data: WorkflowNodeData }>,
-  plannedNodeIds: Set<string>,
-  nodeType: WorkflowNodeType,
-): string | undefined {
-  return nodes.find(
-    (node) => plannedNodeIds.has(node.id) && node.data.nodeType === nodeType,
-  )?.id;
-}
 
 function logOrchestrator(message: string): void {
   console.info(`[workflow-orchestrator] ${message}`);
@@ -58,6 +53,11 @@ export type WorkflowOrchestratorPayload = {
   nodes: Record<string, unknown>[];
   edges: Record<string, unknown>[];
   plannedNodeIds: string[];
+};
+
+type ExecutionRecord = {
+  id: string;
+  nodeId: string;
 };
 
 export const workflowOrchestratorTask = task({
@@ -81,12 +81,17 @@ export const workflowOrchestratorTask = task({
     const { nodes, edges } = parseStoredGraph(payload.nodes, payload.edges);
     const plannedNodeIds = new Set(payload.plannedNodeIds);
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-    const executionByNodeId = new Map(
-      run.executions.map((execution) => [execution.nodeId, execution]),
+    const executionByNodeId = new Map<string, ExecutionRecord>(
+      run.executions.map((execution) => [
+        execution.nodeId,
+        { id: execution.id, nodeId: execution.nodeId },
+      ]),
     );
 
     const outputs: NodeOutputMap = new Map();
-    const completedNodeIds = new Set<string>();
+    const successfulNodeIds = new Set<string>();
+    const failedNodeIds = new Set<string>();
+    const finishedNodeIds = new Set<string>();
     let hasFailure = false;
     let hasDemoFallback = false;
 
@@ -104,6 +109,80 @@ export const workflowOrchestratorTask = task({
       }
     };
 
+    const markBlockedNode = async (nodeId: string, reason: string) => {
+      const execution = executionByNodeId.get(nodeId);
+
+      if (!execution || finishedNodeIds.has(nodeId)) {
+        return;
+      }
+
+      logOrchestrator(`blocked node ${nodeId}: ${reason}`);
+      failedNodeIds.add(nodeId);
+      finishedNodeIds.add(nodeId);
+      hasFailure = true;
+
+      await markNodeExecutionSkipped(execution.id);
+    };
+
+    const completeNodeSuccess = async (
+      nodeId: string,
+      input: Record<string, unknown>,
+      output: Record<string, unknown>,
+      nodeStartedAt: Date,
+    ) => {
+      const execution = executionByNodeId.get(nodeId);
+
+      if (!execution) {
+        return;
+      }
+
+      outputs.set(nodeId, output);
+      successfulNodeIds.add(nodeId);
+      finishedNodeIds.add(nodeId);
+
+      await markNodeExecutionSuccess(
+        execution.id,
+        input,
+        output,
+        nodeStartedAt,
+      );
+
+      logOrchestrator(`node completed ${nodeId}`);
+      logPropagatedOutputs(nodeId, edges, nodes);
+    };
+
+    const completeNodeFailure = async (
+      nodeId: string,
+      input: Record<string, unknown>,
+      message: string,
+      nodeStartedAt: Date,
+      output?: Record<string, unknown>,
+    ) => {
+      const execution = executionByNodeId.get(nodeId);
+
+      if (!execution) {
+        return;
+      }
+
+      hasFailure = true;
+      failedNodeIds.add(nodeId);
+      finishedNodeIds.add(nodeId);
+
+      if (output) {
+        outputs.set(nodeId, output);
+      }
+
+      await markNodeExecutionFailed(
+        execution.id,
+        input,
+        message,
+        nodeStartedAt,
+        output,
+      );
+
+      logOrchestrator(`node failed ${nodeId}: ${message}`);
+    };
+
     const runLocalNode = async (nodeId: string) => {
       const node = nodeMap.get(nodeId);
 
@@ -113,126 +192,172 @@ export const workflowOrchestratorTask = task({
 
       const execution = executionByNodeId.get(nodeId);
 
-      if (!execution) {
+      if (!execution || finishedNodeIds.has(nodeId)) {
+        return;
+      }
+
+      const dependencyStatus = getNodeDependencyStatus(
+        nodeId,
+        successfulNodeIds,
+        failedNodeIds,
+        edges,
+        plannedNodeIds,
+      );
+
+      if (dependencyStatus === "blocked") {
+        await markBlockedNode(nodeId, "upstream dependency failed");
+        return;
+      }
+
+      if (dependencyStatus === "waiting") {
         return;
       }
 
       const nodeStartedAt = new Date();
+      logOrchestrator(`node started ${nodeId} (${node.data.nodeType})`);
       await markNodeExecutionRunning(execution.id);
 
       try {
         const input = buildNodeInputRecord(node, edges, outputs, nodes);
         const output = buildLocalNodeOutput(node, edges, outputs, nodes);
-
-        outputs.set(nodeId, output);
-        completedNodeIds.add(nodeId);
-
-        await markNodeExecutionSuccess(
-          execution.id,
-          input,
-          output,
-          nodeStartedAt,
-        );
+        await completeNodeSuccess(nodeId, input, output, nodeStartedAt);
       } catch (error) {
-        hasFailure = true;
         const message =
           error instanceof Error ? error.message : "Local node failed.";
-
-        await markNodeExecutionFailed(
-          execution.id,
+        await completeNodeFailure(
+          nodeId,
           buildNodeInputRecord(node, edges, outputs, nodes),
           message,
           nodeStartedAt,
         );
-        completedNodeIds.add(nodeId);
       }
     };
 
-    const runExecutableNode = async (nodeId: string) => {
+    const runCropNode = async (
+      nodeId: string,
+      batchResult?: {
+        ok: boolean;
+        output?: { output_image: string; width: number; height: number };
+        error?: unknown;
+      },
+    ) => {
       const node = nodeMap.get(nodeId);
 
-      if (!node || !EXECUTABLE_NODE_TYPES.has(node.data.nodeType)) {
+      if (!node || node.data.nodeType !== "cropImage") {
         return;
       }
 
       const execution = executionByNodeId.get(nodeId);
 
-      if (!execution) {
+      if (!execution || finishedNodeIds.has(nodeId)) {
         return;
       }
 
       const nodeStartedAt = new Date();
       const input = buildNodeInputRecord(node, edges, outputs, nodes);
 
-      await markNodeExecutionRunning(execution.id);
-
       try {
-        if (node.data.nodeType === "cropImage") {
-          assertCropImageInputUrl(input.input_image);
-          const inputImage = requireCropImageInputUrl(input.input_image);
+        assertCropImageInputUrl(input.input_image);
 
-          const result = await cropImageTask.triggerAndWait({
+        let result = batchResult;
+
+        if (!result) {
+          await markNodeExecutionRunning(execution.id);
+          logOrchestrator(`node started ${nodeId} (cropImage)`);
+
+          result = await cropImageTask.triggerAndWait({
             input: {
-              input_image: inputImage,
+              input_image: requireCropImageInputUrl(input.input_image),
               xPercent: input.xPercent as number,
               yPercent: input.yPercent as number,
               widthPercent: input.widthPercent as number,
               heightPercent: input.heightPercent as number,
             },
           });
+        }
 
-          if (!result.ok) {
-            const errorMessage =
-              result.error instanceof Error
-                ? result.error.message
-                : typeof result.error === "string"
-                  ? result.error
-                  : "Crop Image task failed.";
-            throw new Error(errorMessage);
-          }
+        if (!result.ok || !result.output) {
+          const errorMessage =
+            result.error instanceof Error
+              ? result.error.message
+              : typeof result.error === "string"
+                ? result.error
+                : "Crop Image task failed.";
+          throw new Error(errorMessage);
+        }
 
-          const output = {
-            output_image: result.output.output_image,
-            width: result.output.width,
-            height: result.output.height,
-          };
+        const output = {
+          output_image: result.output.output_image,
+          width: result.output.width,
+          height: result.output.height,
+        };
 
-          outputs.set(nodeId, output);
-          completedNodeIds.add(nodeId);
+        await completeNodeSuccess(nodeId, input, output, nodeStartedAt);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Crop Image node failed.";
+        await completeNodeFailure(nodeId, input, message, nodeStartedAt);
+      }
+    };
 
-          await markNodeExecutionSuccess(
-            execution.id,
-            input,
-            output,
-            nodeStartedAt,
-          );
+    const runGeminiNode = async (
+      nodeId: string,
+      batchResult?: {
+        ok: boolean;
+        output?: { response: string };
+        error?: unknown;
+      },
+    ) => {
+      const node = nodeMap.get(nodeId);
+
+      if (!node || node.data.nodeType !== "geminiPro") {
+        return;
+      }
+
+      const execution = executionByNodeId.get(nodeId);
+
+      if (!execution || finishedNodeIds.has(nodeId)) {
+        return;
+      }
+
+      const nodeStartedAt = new Date();
+      const input = buildNodeInputRecord(node, edges, outputs, nodes);
+
+      const applyGeminiDemoFallback = async (errorMessage: string) => {
+        const fallbackOutput = {
+          response: GEMINI_DEMO_FALLBACK_RESPONSE,
+        };
+
+        hasDemoFallback = true;
+        outputs.set(nodeId, fallbackOutput);
+        successfulNodeIds.add(nodeId);
+        finishedNodeIds.add(nodeId);
+
+        await markNodeExecutionFailed(
+          execution.id,
+          input,
+          errorMessage,
+          nodeStartedAt,
+          fallbackOutput,
+        );
+
+        logOrchestrator(`node completed ${nodeId} (demo fallback)`);
+        logPropagatedOutputs(nodeId, edges, nodes);
+      };
+
+      try {
+        if (isDemoModeEnabled() && !isGeminiDebugEnabled()) {
+          await markNodeExecutionRunning(execution.id);
+          logOrchestrator(`node started ${nodeId} (geminiPro demo)`);
+          await applyGeminiDemoFallback(getDemoModeSkipError());
           return;
         }
 
-        if (node.data.nodeType === "geminiPro") {
-          const applyGeminiDemoFallback = async (errorMessage: string) => {
-            const fallbackOutput = {
-              response: GEMINI_DEMO_FALLBACK_RESPONSE,
-            };
+        let result = batchResult;
 
-            outputs.set(nodeId, fallbackOutput);
-            completedNodeIds.add(nodeId);
-            hasFailure = true;
-            hasDemoFallback = true;
-
-            await markNodeExecutionFailed(
-              execution.id,
-              input,
-              errorMessage,
-              nodeStartedAt,
-              fallbackOutput,
-            );
-          };
-
-          if (isDemoModeEnabled() && !isGeminiDebugEnabled()) {
-            await applyGeminiDemoFallback(getDemoModeSkipError());
-            return;
-          }
+        if (!result) {
+          await markNodeExecutionRunning(execution.id);
+          logOrchestrator(`node started ${nodeId} (geminiPro)`);
 
           logGeminiEnvSnapshot("orchestrator before gemini-pro triggerAndWait");
           logGeminiDebug("orchestrator gemini input summary", {
@@ -242,7 +367,7 @@ export const workflowOrchestratorTask = task({
             hasImageVision: Boolean(input.image_vision),
           });
 
-          const result = await geminiProTask.triggerAndWait({
+          result = await geminiProTask.triggerAndWait({
             input: {
               prompt: String(input.prompt ?? ""),
               systemPrompt: String(input.system_prompt ?? ""),
@@ -251,117 +376,319 @@ export const workflowOrchestratorTask = task({
               maxOutputTokens: input.maxOutputTokens as number,
             },
           });
+        }
 
-          if (!result.ok) {
-            const errorMessage =
-              result.error instanceof Error
-                ? result.error.message
-                : typeof result.error === "string"
-                  ? result.error
-                  : "Gemini task failed.";
+        if (!result.ok || !result.output) {
+          const errorMessage =
+            result.error instanceof Error
+              ? result.error.message
+              : typeof result.error === "string"
+                ? result.error
+                : "Gemini task failed.";
 
-            if (shouldUseGeminiDemoFallback(errorMessage) && !isGeminiDebugEnabled()) {
-              await applyGeminiDemoFallback(errorMessage);
-              return;
-            }
-
-            logGeminiDebug("orchestrator gemini-pro task failed (no demo fallback)", {
-              nodeId,
-              errorMessage,
-            });
-
-            throw new Error(errorMessage);
+          if (shouldUseGeminiDemoFallback(errorMessage) && !isGeminiDebugEnabled()) {
+            await applyGeminiDemoFallback(errorMessage);
+            return;
           }
 
-          const output = {
-            response: result.output.response,
-          };
+          logGeminiDebug("orchestrator gemini-pro task failed (no demo fallback)", {
+            nodeId,
+            errorMessage,
+          });
 
-          outputs.set(nodeId, output);
-          completedNodeIds.add(nodeId);
-
-          await markNodeExecutionSuccess(
-            execution.id,
-            input,
-            output,
-            nodeStartedAt,
-          );
+          throw new Error(errorMessage);
         }
-      } catch (error) {
-        hasFailure = true;
-        const message =
-          error instanceof Error ? error.message : "Executable node failed.";
 
-        await markNodeExecutionFailed(execution.id, input, message, nodeStartedAt);
-        completedNodeIds.add(nodeId);
+        const output = {
+          response: result.output.response,
+        };
+
+        await completeNodeSuccess(nodeId, input, output, nodeStartedAt);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Gemini node failed.";
+        await completeNodeFailure(nodeId, input, message, nodeStartedAt);
       }
     };
 
-    try {
-      const requestInputsNodeId = findPlannedNodeId(
-        nodes,
-        plannedNodeIds,
-        "requestInputs",
-      );
+    type LevelBatchEntry =
+      | {
+          nodeId: string;
+          kind: "cropImage";
+          input: Record<string, unknown>;
+        }
+      | {
+          nodeId: string;
+          kind: "geminiPro";
+          input: Record<string, unknown>;
+        };
 
-      if (requestInputsNodeId) {
-        logOrchestrator(`running request inputs node ${requestInputsNodeId}`);
-        await runLocalNode(requestInputsNodeId);
+    type TriggerWaitResult = {
+      ok: boolean;
+      output?: unknown;
+      error?: unknown;
+    };
+
+    const prepareLevelBatchEntry = (
+      nodeId: string,
+    ): LevelBatchEntry | "demo-gemini" | "skip" => {
+      const node = nodeMap.get(nodeId);
+
+      if (!node) {
+        return "skip";
       }
 
-      const executablePending = nodes
-        .filter(
-          (node) =>
-            plannedNodeIds.has(node.id) &&
-            EXECUTABLE_NODE_TYPES.has(node.data.nodeType),
-        )
-        .map((node) => node.id)
-        .filter((nodeId) => !completedNodeIds.has(nodeId));
+      const input = buildNodeInputRecord(node, edges, outputs, nodes);
 
-      while (executablePending.some((nodeId) => !completedNodeIds.has(nodeId))) {
-        const ready = getReadyExecutableNodes(
-          executablePending.filter((nodeId) => !completedNodeIds.has(nodeId)),
-          completedNodeIds,
+      if (node.data.nodeType === "cropImage") {
+        try {
+          assertCropImageInputUrl(input.input_image);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Crop Image input missing.";
+          logOrchestrator(`missing dependency ${nodeId}: ${message}`);
+          return "skip";
+        }
+
+        return { nodeId, kind: "cropImage", input };
+      }
+
+      if (node.data.nodeType === "geminiPro") {
+        const missingImages = countMissingConnectedImages(
+          nodeId,
+          "image_vision",
+          edges,
+          outputs,
+          nodes,
+        );
+
+        if (missingImages > 0) {
+          logOrchestrator(
+            `missing dependency ${nodeId}: ${missingImages} connected image(s) not ready`,
+          );
+          return "skip";
+        }
+
+        if (isDemoModeEnabled() && !isGeminiDebugEnabled()) {
+          return "demo-gemini";
+        }
+
+        return { nodeId, kind: "geminiPro", input };
+      }
+
+      return "skip";
+    };
+
+    const runLevelBatch = async (entries: LevelBatchEntry[]) => {
+      if (entries.length === 0) {
+        return;
+      }
+
+      if (entries.length === 1) {
+        const entry = entries[0]!;
+
+        if (entry.kind === "cropImage") {
+          await runCropNode(entry.nodeId);
+        } else {
+          await runGeminiNode(entry.nodeId);
+        }
+
+        return;
+      }
+
+      await Promise.all(
+        entries.map(({ nodeId }) => {
+          const execution = executionByNodeId.get(nodeId);
+
+          if (!execution) {
+            return Promise.resolve();
+          }
+
+          logOrchestrator(`node started ${nodeId} (level batch)`);
+          return markNodeExecutionRunning(execution.id);
+        }),
+      );
+
+      const { runs } = await batch.triggerByTaskAndWait(
+        entries.map((entry) => {
+          if (entry.kind === "cropImage") {
+            return {
+              task: cropImageTask,
+              payload: {
+                input: {
+                  input_image: requireCropImageInputUrl(entry.input.input_image),
+                  xPercent: entry.input.xPercent as number,
+                  yPercent: entry.input.yPercent as number,
+                  widthPercent: entry.input.widthPercent as number,
+                  heightPercent: entry.input.heightPercent as number,
+                },
+              },
+            };
+          }
+
+          return {
+            task: geminiProTask,
+            payload: {
+              input: {
+                prompt: String(entry.input.prompt ?? ""),
+                systemPrompt: String(entry.input.system_prompt ?? ""),
+                imageUrl: (entry.input.image_vision as string | null) ?? null,
+                temperature: entry.input.temperature as number,
+                maxOutputTokens: entry.input.maxOutputTokens as number,
+              },
+            },
+          };
+        }),
+      );
+
+      for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index]!;
+        const result = runs[index] as TriggerWaitResult | undefined;
+
+        if (entry.kind === "cropImage") {
+          await runCropNode(entry.nodeId, result as {
+            ok: boolean;
+            output?: { output_image: string; width: number; height: number };
+            error?: unknown;
+          });
+        } else {
+          await runGeminiNode(entry.nodeId, result as {
+            ok: boolean;
+            output?: { response: string };
+            error?: unknown;
+          });
+        }
+      }
+    };
+
+    const runExecutionLevel = async (levelNodeIds: string[]) => {
+      const runnable: string[] = [];
+
+      for (const nodeId of levelNodeIds) {
+        if (!plannedNodeIds.has(nodeId) || finishedNodeIds.has(nodeId)) {
+          continue;
+        }
+
+        const dependencyStatus = getNodeDependencyStatus(
+          nodeId,
+          successfulNodeIds,
+          failedNodeIds,
           edges,
           plannedNodeIds,
         );
 
-        if (ready.length === 0) {
-          hasFailure = true;
-          break;
+        if (dependencyStatus === "blocked") {
+          await markBlockedNode(nodeId, "upstream dependency failed");
+          continue;
         }
 
-        // Trigger.dev forbids Promise.all around triggerAndWait (parallel waits).
-        // Run each ready node one at a time; DAG still ensures dependencies first.
-        for (const nodeId of ready) {
-          await runExecutableNode(nodeId);
+        if (dependencyStatus === "waiting") {
+          logOrchestrator(`missing dependency ${nodeId}: upstream not ready`);
+          continue;
         }
+
+        runnable.push(nodeId);
       }
 
-      const responseNodeId = findPlannedNodeId(
-        nodes,
-        plannedNodeIds,
-        "response",
+      if (runnable.length === 0) {
+        return;
+      }
+
+      logOrchestrator(`started level nodes: ${runnable.join(", ")}`);
+
+      const localNodeIds = runnable.filter((nodeId) => {
+        const nodeType = nodeMap.get(nodeId)?.data.nodeType;
+        return nodeType != null && LOCAL_NODE_TYPES.has(nodeType);
+      });
+      const executableNodeIds = runnable.filter((nodeId) => {
+        const nodeType = nodeMap.get(nodeId)?.data.nodeType;
+        return nodeType === "cropImage" || nodeType === "geminiPro";
+      });
+
+      await Promise.all(localNodeIds.map((nodeId) => runLocalNode(nodeId)));
+
+      const batchEntries: LevelBatchEntry[] = [];
+      const demoGeminiNodeIds: string[] = [];
+      const skippedExecutables: Array<{ nodeId: string; message: string }> =
+        [];
+
+      for (const nodeId of executableNodeIds) {
+        const prepared = prepareLevelBatchEntry(nodeId);
+
+        if (prepared === "skip") {
+          const node = nodeMap.get(nodeId);
+
+          if (node?.data.nodeType === "cropImage") {
+            skippedExecutables.push({
+              nodeId,
+              message: "Crop Image requires a valid connected input image.",
+            });
+          } else if (node?.data.nodeType === "geminiPro") {
+            skippedExecutables.push({
+              nodeId,
+              message: "Connected image input is not ready.",
+            });
+          }
+
+          continue;
+        }
+
+        if (prepared === "demo-gemini") {
+          demoGeminiNodeIds.push(nodeId);
+          continue;
+        }
+
+        batchEntries.push(prepared);
+      }
+
+      await Promise.all(demoGeminiNodeIds.map((nodeId) => runGeminiNode(nodeId)));
+      await runLevelBatch(batchEntries);
+
+      for (const skipped of skippedExecutables) {
+        if (finishedNodeIds.has(skipped.nodeId)) {
+          continue;
+        }
+
+        const node = nodeMap.get(skipped.nodeId);
+        const execution = executionByNodeId.get(skipped.nodeId);
+
+        if (!node || !execution) {
+          continue;
+        }
+
+        await completeNodeFailure(
+          skipped.nodeId,
+          buildNodeInputRecord(node, edges, outputs, nodes),
+          skipped.message,
+          new Date(),
+        );
+      }
+    };
+
+    try {
+      const levels = computeExecutionLevels(plannedNodeIds, edges);
+
+      logOrchestrator(
+        `computed ${levels.length} execution level(s): ${levels
+          .map((level, index) => `L${index}=[${level.join(", ")}]`)
+          .join(" ")}`,
       );
 
-      if (responseNodeId) {
-        if (!hasFailure || hasDemoFallback) {
-          logOrchestrator(`running response node ${responseNodeId}`);
-          await runLocalNode(responseNodeId);
-        } else {
-          const execution = executionByNodeId.get(responseNodeId);
+      for (let levelIndex = 0; levelIndex < levels.length; levelIndex += 1) {
+        const level = levels[levelIndex] ?? [];
 
-          if (execution) {
-            await markNodeExecutionSkipped(execution.id);
-          }
-        }
+        logOrchestrator(
+          `running level ${levelIndex} (${level.length} node(s)): ${level.join(", ")}`,
+        );
+
+        await runExecutionLevel(level);
       }
 
       await markSkippedNodes();
       await settlePlannedExecutions(
         run.executions,
         plannedNodeIds,
-        completedNodeIds,
+        finishedNodeIds,
         executionByNodeId,
       );
 
@@ -388,7 +715,7 @@ export const workflowOrchestratorTask = task({
       await settlePlannedExecutions(
         run.executions,
         plannedNodeIds,
-        completedNodeIds,
+        finishedNodeIds,
         executionByNodeId,
       );
 

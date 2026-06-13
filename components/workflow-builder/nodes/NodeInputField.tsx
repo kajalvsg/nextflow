@@ -11,6 +11,7 @@ type NodeInputFieldProps = {
   value: string;
   disabled?: boolean;
   connected?: boolean;
+  connectedHint?: string | null;
   minRows?: number;
   handleId?: string;
   handleType?: "target" | "source";
@@ -31,6 +32,7 @@ export function NodeInputField({
   value,
   disabled = false,
   connected = false,
+  connectedHint = null,
   minRows = 2,
   handleId,
   handleType = "target",
@@ -129,7 +131,7 @@ export function NodeInputField({
               dense ? "mt-0.5" : "mt-1",
             )}
           >
-            Connected — manual input disabled.
+            {connectedHint ?? "Connected — manual input disabled."}
           </p>
         ) : null}
       </div>
