@@ -16,6 +16,8 @@ type WorkflowBuilderContextValue = {
     nodeId: string,
     updater: (data: StickyNoteNodeData) => StickyNoteNodeData,
   ) => void;
+  selectStickyNote: (nodeId: string) => void;
+  deselectStickyNote: (nodeId: string) => void;
   deleteStickyNote: (nodeId: string) => void;
   isSourceHandleConnected: (nodeId: string, handleId: string) => boolean;
   isTargetHandleConnected: (nodeId: string, handleId: string) => boolean;

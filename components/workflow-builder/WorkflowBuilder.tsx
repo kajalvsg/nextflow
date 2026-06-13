@@ -753,6 +753,29 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     [workflowId],
   );
 
+  const selectStickyNote = useCallback((nodeId: string) => {
+    setNodes((current) => {
+      const next = current.map((node) => ({ ...node, selected: false }));
+      nodesRef.current = next;
+      return next;
+    });
+
+    setStickyNotes((current) =>
+      current.map((note) => ({
+        ...note,
+        selected: note.id === nodeId,
+      })),
+    );
+  }, []);
+
+  const deselectStickyNote = useCallback((nodeId: string) => {
+    setStickyNotes((current) =>
+      current.map((note) =>
+        note.id === nodeId ? { ...note, selected: false } : note,
+      ),
+    );
+  }, []);
+
   const deleteStickyNote = useCallback(
     (nodeId: string) => {
       setStickyNotes((current) => {
@@ -760,8 +783,12 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
         saveStickyNotes(workflowId, next);
         return next;
       });
+
+      reactFlow.setNodes((flowNodes) =>
+        flowNodes.filter((node) => node.id !== nodeId),
+      );
     },
-    [workflowId],
+    [reactFlow, workflowId],
   );
 
   const handleAutoArrange = useCallback(() => {
@@ -2053,6 +2080,8 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       workflowId: workflow.id,
       updateNodeData,
       updateStickyNote,
+      selectStickyNote,
+      deselectStickyNote,
       deleteStickyNote,
       isSourceHandleConnected: isSourceConnected,
       isTargetHandleConnected: isTargetConnected,
@@ -2076,6 +2105,8 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       workflow.id,
       updateNodeData,
       updateStickyNote,
+      selectStickyNote,
+      deselectStickyNote,
       deleteStickyNote,
       isSourceConnected,
       isTargetConnected,
