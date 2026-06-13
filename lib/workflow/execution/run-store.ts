@@ -3,6 +3,10 @@ import { defaultLabelForNodeType } from "@/lib/workflow/node-defaults";
 import type { RunScope, RunStatus } from "@/types/workflow-execution";
 import type { WorkflowNodeType } from "@/types/workflow-canvas";
 
+function logRunStore(message: string): void {
+  console.info(`[run-store] ${message}`);
+}
+
 export async function createWorkflowRunRecord(input: {
   workflowId: string;
   userId: string;
@@ -30,19 +34,29 @@ export async function createWorkflowRunRecord(input: {
     },
   });
 
+  logRunStore(
+    `created workflow run ${run.id} (${input.scope}, ${input.plannedNodes.length} nodes) -> running`,
+  );
+
   return run;
 }
 
 export async function markNodeExecutionRunning(executionId: string) {
   await ensureDbReady();
 
-  return db.nodeExecution.update({
+  const updated = await db.nodeExecution.update({
     where: { id: executionId },
     data: {
       status: "running",
       startedAt: new Date(),
     },
   });
+
+  logRunStore(
+    `node execution ${updated.nodeId} (${executionId}) pending -> running`,
+  );
+
+  return updated;
 }
 
 export async function markNodeExecutionSuccess(
@@ -55,7 +69,7 @@ export async function markNodeExecutionSuccess(
 
   const endedAt = new Date();
 
-  return db.nodeExecution.update({
+  const updated = await db.nodeExecution.update({
     where: { id: executionId },
     data: {
       status: "success",
@@ -65,6 +79,12 @@ export async function markNodeExecutionSuccess(
       durationMs: endedAt.getTime() - startedAt.getTime(),
     },
   });
+
+  logRunStore(
+    `node execution ${updated.nodeId} (${executionId}) -> success (${updated.durationMs ?? 0}ms)`,
+  );
+
+  return updated;
 }
 
 export async function markNodeExecutionFailed(
@@ -78,7 +98,7 @@ export async function markNodeExecutionFailed(
 
   const endedAt = new Date();
 
-  return db.nodeExecution.update({
+  const updated = await db.nodeExecution.update({
     where: { id: executionId },
     data: {
       status: "failed",
@@ -89,6 +109,12 @@ export async function markNodeExecutionFailed(
       durationMs: endedAt.getTime() - startedAt.getTime(),
     },
   });
+
+  logRunStore(
+    `node execution ${updated.nodeId} (${executionId}) -> failed: ${error}`,
+  );
+
+  return updated;
 }
 
 export async function settlePlannedExecutions(
@@ -121,7 +147,7 @@ export async function settlePlannedExecutions(
 export async function markNodeExecutionSkipped(executionId: string) {
   await ensureDbReady();
 
-  return db.nodeExecution.update({
+  const updated = await db.nodeExecution.update({
     where: { id: executionId },
     data: {
       status: "skipped",
@@ -129,6 +155,12 @@ export async function markNodeExecutionSkipped(executionId: string) {
       durationMs: 0,
     },
   });
+
+  logRunStore(
+    `node execution ${updated.nodeId} (${executionId}) -> skipped`,
+  );
+
+  return updated;
 }
 
 export async function finalizeWorkflowRun(
@@ -139,15 +171,22 @@ export async function finalizeWorkflowRun(
   await ensureDbReady();
 
   const endedAt = new Date();
+  const durationMs = endedAt.getTime() - startedAt.getTime();
 
-  return db.workflowRun.update({
+  const updated = await db.workflowRun.update({
     where: { id: runId },
     data: {
       status,
       endedAt,
-      durationMs: endedAt.getTime() - startedAt.getTime(),
+      durationMs,
     },
   });
+
+  logRunStore(
+    `workflow run ${runId} running -> ${status} (${durationMs}ms)`,
+  );
+
+  return updated;
 }
 
 export function nodeDisplayName(nodeType: string, nodeId: string): string {

@@ -1,14 +1,15 @@
 import type { Edge, Node } from "reactflow";
 import {
   defaultConfigForNodeType,
-  defaultImageFieldState,
   defaultLabelForNodeType,
-  serializeImageFieldState,
 } from "@/lib/workflow/node-defaults";
+import {
+  normalizeRequestInputsConfig,
+  serializeRequestInputsConfig,
+} from "@/lib/workflow/request-inputs-fields";
 import type {
   CropImageConfig,
   GeminiProConfig,
-  ImageFieldState,
   RequestInputsConfig,
   WorkflowCanvasEdge,
   WorkflowCanvasNode,
@@ -130,23 +131,8 @@ function parseNodeType(value: unknown): WorkflowNodeType {
   return "requestInputs";
 }
 
-function parseImageFieldState(value: unknown): ImageFieldState {
-  if (!isRecord(value)) {
-    return defaultImageFieldState();
-  }
-
-  return serializeImageFieldState(value);
-}
-
 function parseRequestInputsConfig(value: unknown): RequestInputsConfig {
-  const defaults = defaultConfigForNodeType("requestInputs") as RequestInputsConfig;
-  if (!isRecord(value)) return defaults;
-
-  return {
-    textField:
-      typeof value.textField === "string" ? value.textField : defaults.textField,
-    imageField: parseImageFieldState(value.imageField),
-  };
+  return normalizeRequestInputsConfig(value);
 }
 
 function parseCropImageConfig(value: unknown): CropImageConfig {
@@ -311,12 +297,9 @@ export function sanitizeGraphForSave(
         nodeType: node.data.nodeType,
         config:
           node.data.nodeType === "requestInputs"
-            ? {
-                textField: (node.data.config as RequestInputsConfig).textField,
-                imageField: serializeImageFieldState(
-                  (node.data.config as RequestInputsConfig).imageField,
-                ),
-              }
+            ? serializeRequestInputsConfig(
+                node.data.config as RequestInputsConfig,
+              )
             : node.data.config,
       },
       deletable: !PROTECTED_NODE_IDS.has(node.id),

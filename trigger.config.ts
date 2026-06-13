@@ -6,6 +6,10 @@ export default defineConfig({
   logLevel: "log",
   maxDuration: 3600,
   dirs: ["./trigger"],
+  build: {
+    // PGlite is WASM-based; bundling it breaks pglite.data resolution in .trigger/tmp/build-*.
+    external: ["@electric-sql/pglite", "pglite-prisma-adapter"],
+  },
   retries: {
     enabledInDev: false,
     default: {

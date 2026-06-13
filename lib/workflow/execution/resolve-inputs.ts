@@ -1,13 +1,13 @@
 import type { Edge, Node } from "reactflow";
-import { getExecutableImageUrl } from "@/lib/upload/image-upload";
 import { normalizeEdgeForResolution } from "@/lib/workflow/execution/edge-handles";
 import {
+  normalizeImageInputUrl,
   resolveImageInputFromEdge,
 } from "@/lib/workflow/execution/image-input";
+import { normalizeRequestInputsConfig } from "@/lib/workflow/request-inputs-fields";
 import type {
   CropImageConfig,
   GeminiProConfig,
-  RequestInputsConfig,
   WorkflowNodeData,
 } from "@/types/workflow-canvas";
 
@@ -16,19 +16,24 @@ export type NodeOutputMap = Map<string, Record<string, unknown>>;
 export function resolveRequestInputsOutput(
   node: Node<WorkflowNodeData>,
 ): Record<string, unknown> {
-  const config = node.data.config as RequestInputsConfig;
-  const executableImageUrl = getExecutableImageUrl(config.imageField.fileUrl);
+  const config = normalizeRequestInputsConfig(node.data.config);
+  const output: Record<string, unknown> = {};
 
-  return {
-    text_field: config.textField,
-    image_field: executableImageUrl,
-    image_field_meta: {
-      fileName: config.imageField.fileName,
-      fileUrl: config.imageField.fileUrl,
-      mimeType: config.imageField.mimeType,
-      size: config.imageField.size,
-    },
-  };
+  for (const field of config.fields) {
+    if (field.type === "text_field") {
+      output[field.id] = field.textValue ?? "";
+      continue;
+    }
+
+    const imageValue = field.imageValue;
+    const rawUrl = imageValue?.fileUrl?.trim() ?? "";
+    output[field.id] = rawUrl
+      ? normalizeImageInputUrl(rawUrl) ?? rawUrl
+      : null;
+    output[`${field.id}_meta`] = imageValue ?? null;
+  }
+
+  return output;
 }
 
 function getIncomingEdges(nodeId: string, edges: Edge[]): Edge[] {
@@ -59,7 +64,7 @@ export function resolveCropImageInput(
     .map((edge) => normalizeEdgeForResolution(edge, nodes))
     .find((edge) => edge.targetHandle === "input_image");
 
-  const imageUrl = resolveImageInputFromEdge(incoming, outputs);
+  const imageUrl = resolveImageInputFromEdge(incoming, outputs, nodes);
 
   return { input_image: imageUrl };
 }
@@ -88,7 +93,7 @@ export function resolveGeminiInput(
     system_prompt: systemEdge
       ? resolveHandleValue(systemEdge.source, systemEdge.sourceHandle, outputs)
       : "",
-    image_vision: resolveImageInputFromEdge(visionEdge, outputs),
+    image_vision: resolveImageInputFromEdge(visionEdge, outputs, nodes),
   };
 }
 

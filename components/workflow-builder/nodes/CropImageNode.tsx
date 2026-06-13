@@ -1,18 +1,23 @@
 "use client";
 
-import { Crop } from "lucide-react";
 import { type NodeProps } from "reactflow";
-import { Input } from "@/components/ui/Input";
 import type { CropImageConfig, WorkflowNodeData } from "@/types/workflow-canvas";
 import { useWorkflowBuilder } from "../WorkflowBuilderContext";
 import { NodeCardShell } from "./NodeCardShell";
-import { NodeHandle } from "./NodeHandle";
-import { NodeInlineOutputSection } from "./NodeInlineOutputSection";
+import { NodeCropSliderRow } from "./NodeCropSliderRow";
+import { NodeOutputPreview } from "./NodeOutputPreview";
+import { NodeUploadInputRow } from "./NodeUploadInputRow";
 
 export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData>) {
-  const { updateNodeData, getNodeExecutionStatus, getNodeInlineExecution } =
-    useWorkflowBuilder();
+  const {
+    updateNodeData,
+    getNodeExecutionStatus,
+    getNodeInlineExecution,
+    isTargetHandleConnected,
+    autoConnectHandle,
+  } = useWorkflowBuilder();
   const config = data.config as CropImageConfig;
+  const inputImageConnected = isTargetHandleConnected(id, "input_image");
 
   const updateConfig = (patch: Partial<CropImageConfig>) => {
     updateNodeData(id, (current) => ({
@@ -22,69 +27,64 @@ export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData
   };
 
   return (
-    <div className="relative">
-      <NodeHandle id="input_image" type="target" top="28%" />
-      <NodeHandle id="output_image" type="source" top="72%" />
-
+    <div className="relative w-[272px]">
       <NodeCardShell
         nodeId={id}
-        title={data.label}
-        subtitle="Image Processing"
-        icon={Crop}
+        title="Crop Image"
         selected={selected}
+        locked={data.locked}
+        showHeaderIcon={false}
+        headerVariant="model"
+        dense
         executionStatus={getNodeExecutionStatus(id)}
+        className="workflow-node-card-crop w-full overflow-visible"
       >
-        <div className="nodrag nopan nowheel grid grid-cols-2 gap-2">
-          <Input
-            label="X Position (%)"
-            type="number"
-            min={0}
-            max={100}
-            value={config.xPercent}
-            className="workflow-node-field"
-            onChange={(event) =>
-              updateConfig({ xPercent: Number(event.target.value) })
-            }
-          />
-          <Input
-            label="Y Position (%)"
-            type="number"
-            min={0}
-            max={100}
-            value={config.yPercent}
-            className="workflow-node-field"
-            onChange={(event) =>
-              updateConfig({ yPercent: Number(event.target.value) })
-            }
-          />
-          <Input
-            label="Width (%)"
-            type="number"
-            min={1}
-            max={100}
-            value={config.widthPercent}
-            className="workflow-node-field"
-            onChange={(event) =>
-              updateConfig({ widthPercent: Number(event.target.value) })
-            }
-          />
-          <Input
-            label="Height (%)"
-            type="number"
-            min={1}
-            max={100}
-            value={config.heightPercent}
-            className="workflow-node-field"
-            onChange={(event) =>
-              updateConfig({ heightPercent: Number(event.target.value) })
-            }
-          />
-        </div>
+        <NodeUploadInputRow
+          dense
+          label="Input Image"
+          buttonLabel="Upload image"
+          handleId="input_image"
+          connected={inputImageConnected}
+          connectedText="Image input connected"
+          onAddConnection={() => autoConnectHandle(id, "input_image")}
+          disabled
+        />
 
-        <NodeInlineOutputSection
-          sectionLabel="Output Image"
+        <NodeCropSliderRow
+          dense
+          label="X Position (%)"
+          value={config.xPercent}
+          defaultValue={0}
+          onChange={(value) => updateConfig({ xPercent: value })}
+        />
+        <NodeCropSliderRow
+          dense
+          label="Y Position (%)"
+          value={config.yPercent}
+          defaultValue={0}
+          onChange={(value) => updateConfig({ yPercent: value })}
+        />
+        <NodeCropSliderRow
+          dense
+          label="Width (%)"
+          value={config.widthPercent}
+          defaultValue={100}
+          onChange={(value) => updateConfig({ widthPercent: value })}
+        />
+        <NodeCropSliderRow
+          dense
+          label="Height (%)"
+          value={config.heightPercent}
+          defaultValue={100}
+          onChange={(value) => updateConfig({ heightPercent: value })}
+        />
+
+        <NodeOutputPreview
+          dense
+          label="Output Image"
           nodeType="cropImage"
           inlineExecution={getNodeInlineExecution(id)}
+          outputHandleId="output_image"
         />
       </NodeCardShell>
     </div>

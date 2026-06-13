@@ -33,6 +33,7 @@ import {
 import { PROTECTED_NODE_IDS, sanitizeGraphForSave } from "@/lib/workflow/canvas";
 import { getEdgeStrokeColor } from "@/lib/workflow/edge-colors";
 import { prepareGraphPayload, serializeGraphPayload } from "@/lib/workflow/graph-payload";
+import { pollServerAction } from "@/lib/utils/poll-server-action";
 import {
   buildWorkflowExportDocument,
   createAssignmentSampleWorkflow,
@@ -109,8 +110,9 @@ type SaveStatus = "idle" | "saving" | "saved" | "error";
 const TOAST_DURATION_MS = 3200;
 const SAVE_INDICATOR_HIDE_MS = 2000;
 const AUTOSAVE_DEBOUNCE_MS = 1200;
-const RUN_POLL_INTERVAL_MS = 4000;
+const RUN_POLL_INTERVAL_MS = 2500;
 const RUN_STATUS_RESET_MS = 3500;
+const MAX_RUN_POLL_FAILURES = 5;
 
 function mapSnapshotsToInlineExecutions(
   snapshots: Record<
@@ -166,12 +168,14 @@ type NodePickerPanelProps = {
     type: AddableWorkflowNodeType,
     position: { x: number; y: number },
   ) => void;
+  onDemoSelect: (message: string) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 };
 
 function NodePickerOverlay({
   onAddNode,
+  onDemoSelect,
   open,
   onOpenChange,
 }: NodePickerPanelProps) {
@@ -185,15 +189,18 @@ function NodePickerOverlay({
     [onAddNode, reactFlow],
   );
 
+  if (!open) {
+    return null;
+  }
+
   return (
-    <div className="workflow-node-picker-overlay pointer-events-none absolute inset-x-0 bottom-[4.75rem] flex justify-center">
-      <NodePicker
-        open={open}
-        onOpenChange={onOpenChange}
-        showTrigger={false}
-        onSelectType={handleSelectType}
-      />
-    </div>
+    <NodePicker
+      open={open}
+      onOpenChange={onOpenChange}
+      showTrigger={false}
+      onSelectType={handleSelectType}
+      onDemoSelect={onDemoSelect}
+    />
   );
 }
 
@@ -260,7 +267,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
   const [historyTick, setHistoryTick] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [nodePickerOpen, setNodePickerOpen] = useState(false);
-  const [showMinimap, setShowMinimap] = useState(true);
+  const [showMinimap, setShowMinimap] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [moveConnectedGroup, setMoveConnectedGroup] = useState(false);
   const [isWorkflowCanvasDragging, setIsWorkflowCanvasDragging] = useState(false);
@@ -407,6 +414,18 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
         }
 
         return false;
+      } catch (error) {
+        console.error("[save] saveWorkflowGraph failed:", error);
+
+        if (isMountedRef.current) {
+          setSaveStatus("error");
+          setCanRunWorkflow(false);
+          showToast(
+            error instanceof Error ? error.message : "Failed to save workflow.",
+          );
+        }
+
+        return false;
       } finally {
         saveInFlightRef.current = false;
       }
@@ -483,6 +502,14 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
+      }
+
+      if (saveInFlightRef.current) {
+        const deadline = Date.now() + 5_000;
+
+        while (saveInFlightRef.current && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
       }
 
       return runSave(nextNodes, nextEdges, { force });
@@ -1154,6 +1181,43 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     [removeEdges],
   );
 
+  const removeEdgesForSourceHandle = useCallback(
+    (nodeId: string, handleId: string) => {
+      const edgeIds = new Set(
+        edgesRef.current
+          .filter(
+            (edge) =>
+              edge.source === nodeId && edge.sourceHandle === handleId,
+          )
+          .map((edge) => edge.id),
+      );
+      removeEdges(edgeIds);
+    },
+    [removeEdges],
+  );
+
+  const remapSourceHandle = useCallback(
+    (nodeId: string, oldHandleId: string, newHandleId: string) => {
+      if (oldHandleId === newHandleId) {
+        return;
+      }
+
+      recordFieldEditHistory();
+
+      setEdges((current) => {
+        const next = current.map((edge) =>
+          edge.source === nodeId && edge.sourceHandle === oldHandleId
+            ? { ...edge, sourceHandle: newHandleId }
+            : edge,
+        );
+        edgesRef.current = next;
+        scheduleSave();
+        return next;
+      });
+    },
+    [recordFieldEditHistory, scheduleSave],
+  );
+
   const onEdgeDoubleClick = useCallback(
     (_event: React.MouseEvent, edge: Edge) => {
       removeEdges(new Set([edge.id]));
@@ -1687,26 +1751,70 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     let cancelled = false;
     let resetTimer: ReturnType<typeof setTimeout> | null = null;
     let interval: ReturnType<typeof setInterval> | null = null;
+    let pollFailureCount = 0;
+    let pollInFlight = false;
+
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const clearUpdatingStates = () => {
+      setNodeInlineExecutions((previous) => {
+        const next = { ...previous };
+
+        for (const [nodeId, inline] of Object.entries(next)) {
+          if (inline.status === "updating") {
+            delete next[nodeId];
+          }
+        }
+
+        return next;
+      });
+    };
 
     const poll = async () => {
-      if (cancelled || !isWorkflowRunning) {
+      if (cancelled || !isWorkflowRunning || pollInFlight) {
         return;
       }
 
-      const state = await getActiveRunState(activeRunId);
+      pollInFlight = true;
+
+      let state;
+
+      try {
+        state = await pollServerAction("getActiveRunState", () =>
+          getActiveRunState(activeRunId),
+        );
+        pollFailureCount = 0;
+      } catch {
+        pollFailureCount += 1;
+
+        if (pollFailureCount >= MAX_RUN_POLL_FAILURES) {
+          stopPolling();
+          setIsWorkflowRunning(false);
+          clearUpdatingStates();
+          showToast(
+            "Lost connection to run status. Check execution history for results.",
+          );
+        }
+
+        return;
+      } finally {
+        pollInFlight = false;
+      }
 
       if (cancelled) {
         return;
       }
 
       if (!state) {
-        if (interval) {
-          clearInterval(interval);
-          interval = null;
-        }
-
+        stopPolling();
         setIsWorkflowRunning(false);
         setActiveRunId(null);
+        clearUpdatingStates();
         return;
       }
 
@@ -1715,31 +1823,39 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       applyRunExecutionSnapshots(state.nodeExecutions);
 
       if (state.status !== "running") {
-        if (interval) {
-          clearInterval(interval);
-          interval = null;
-        }
-
+        stopPolling();
         setIsWorkflowRunning(false);
         setHistoryRefreshKey((current) => current + 1);
 
-        void reloadInlineExecutions().then(() => {
-          if (cancelled) {
-            return;
-          }
-
-          setNodeInlineExecutions((previous) => {
-            const next = { ...previous };
-
-            for (const [nodeId, inline] of Object.entries(next)) {
-              if (inline.status === "updating") {
-                delete next[nodeId];
-              }
+        void pollServerAction("getLatestWorkflowInlineExecutions", () =>
+          getLatestWorkflowInlineExecutions(workflowId),
+        )
+          .then((executions) => {
+            if (cancelled) {
+              return;
             }
 
-            return next;
+            setNodeInlineExecutions((previous) => {
+              const next = { ...previous, ...executions };
+
+              for (const [nodeId, inline] of Object.entries(next)) {
+                if (inline.status === "updating") {
+                  delete next[nodeId];
+                }
+              }
+
+              return next;
+            });
+          })
+          .catch((error) => {
+            console.error(
+              "[poll] getLatestWorkflowInlineExecutions failed:",
+              error,
+            );
+            if (!cancelled) {
+              clearUpdatingStates();
+            }
           });
-        });
 
         if (state.status === "success") {
           showToast("Workflow run completed.");
@@ -1764,10 +1880,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
     return () => {
       cancelled = true;
-
-      if (interval) {
-        clearInterval(interval);
-      }
+      stopPolling();
 
       if (resetTimer) {
         clearTimeout(resetTimer);
@@ -1777,9 +1890,9 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     activeRunId,
     applyRunExecutionSnapshots,
     isWorkflowRunning,
-    reloadInlineExecutions,
     resetRunVisualState,
     showToast,
+    workflowId,
   ]);
 
   useEffect(() => {
@@ -1846,6 +1959,8 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       isWorkflowRunning,
       runNode,
       removeEdge,
+      removeEdgesForSourceHandle,
+      remapSourceHandle,
       refreshNode,
       duplicateNode,
       duplicateNodeWithEdges,
@@ -1866,6 +1981,8 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       isWorkflowRunning,
       runNode,
       removeEdge,
+      removeEdgesForSourceHandle,
+      remapSourceHandle,
       refreshNode,
       duplicateNode,
       duplicateNodeWithEdges,
@@ -1974,6 +2091,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
             </div>
             <NodePickerOverlay
               onAddNode={addNode}
+              onDemoSelect={showToast}
               open={nodePickerOpen}
               onOpenChange={setNodePickerOpen}
             />
@@ -1982,6 +2100,8 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
             <WorkflowHistoryPanel
               workflowId={workflow.id}
               refreshKey={historyRefreshKey}
+              activeRunId={activeRunId}
+              isRunActive={isWorkflowRunning}
               onClose={() => setHistoryOpen(false)}
             />
           ) : null}

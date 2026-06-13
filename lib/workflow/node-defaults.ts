@@ -1,3 +1,4 @@
+import { defaultRequestInputsConfig } from "@/lib/workflow/request-inputs-fields";
 import type {
   CropImageConfig,
   GeminiProConfig,
@@ -36,12 +37,7 @@ export function serializeImageFieldState(
   };
 }
 
-export function defaultRequestInputsConfig(): RequestInputsConfig {
-  return {
-    textField: "",
-    imageField: defaultImageFieldState(),
-  };
-}
+export { defaultRequestInputsConfig } from "@/lib/workflow/request-inputs-fields";
 
 export function defaultCropImageConfig(): CropImageConfig {
   return {
@@ -84,11 +80,11 @@ export function defaultConfigForNodeType(
 export function defaultLabelForNodeType(nodeType: WorkflowNodeType): string {
   switch (nodeType) {
     case "requestInputs":
-      return "Request Inputs";
+      return "Request-Inputs";
     case "cropImage":
       return "Crop Image";
     case "geminiPro":
-      return "Gemini";
+      return "Gemini 3.1 Pro";
     case "response":
       return "Response";
   }

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
+import { hasPostgresDatabaseUrl, isLocalDatabaseEnabled } from "./lib/database-mode.mjs";
 
 config({ path: ".env.local" });
 config({ path: ".env" });
@@ -92,7 +93,7 @@ async function checkRemoteDatabase(connectionString) {
 }
 
 try {
-  if (process.env.USE_LOCAL_DB === "true") {
+  if (isLocalDatabaseEnabled()) {
     await checkLocalDatabase();
     process.exit(0);
   }
@@ -105,12 +106,17 @@ try {
     process.exit(1);
   }
 
+  if (!hasPostgresDatabaseUrl()) {
+    console.error("❌ DATABASE_URL must start with postgresql:// or postgres://");
+    process.exit(1);
+  }
+
   await checkRemoteDatabase(connectionString);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error("❌ Database check failed:", message);
 
-  if (process.env.USE_LOCAL_DB !== "true") {
+  if (!isLocalDatabaseEnabled()) {
     console.error("\nQuick fix for local development (no Neon required):");
     console.error("  1. Add USE_LOCAL_DB=true to .env.local");
     console.error("  2. Run: npm run db:check");

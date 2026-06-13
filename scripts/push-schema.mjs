@@ -2,12 +2,13 @@
  * Push schema via Node pg (Neon) or PGlite (local).
  * Use when `prisma db push` fails with P1001 on networks without working IPv6.
  */
+import { config } from "dotenv";
 import { readFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { config } from "dotenv";
 import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
+import { hasPostgresDatabaseUrl, isLocalDatabaseEnabled } from "./lib/database-mode.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, "..");
@@ -75,7 +76,7 @@ async function pushToRemoteDatabase(connectionString) {
 }
 
 try {
-  if (process.env.USE_LOCAL_DB === "true") {
+  if (isLocalDatabaseEnabled()) {
     await pushToLocalDatabase();
     process.exit(0);
   }
@@ -88,12 +89,17 @@ try {
     process.exit(1);
   }
 
+  if (!hasPostgresDatabaseUrl()) {
+    console.error("❌ DATABASE_URL must start with postgresql:// or postgres://");
+    process.exit(1);
+  }
+
   await pushToRemoteDatabase(connectionString);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error("❌ Failed to push schema:", message || "(connection timeout)");
 
-  if (process.env.USE_LOCAL_DB !== "true") {
+  if (!isLocalDatabaseEnabled()) {
     console.error("\nQuick fix for local development (no Neon required):");
     console.error("  1. Add USE_LOCAL_DB=true to .env.local");
     console.error("  2. Run: npm run db:push");

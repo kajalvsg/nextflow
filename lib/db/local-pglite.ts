@@ -1,34 +1,70 @@
 import "server-only";
 
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
-import { resetLocalPrismaClient } from "@/lib/prisma";
+import { resolveProjectRoot } from "@/lib/db/project-root";
+import { isLocalDatabaseEnabled } from "@/lib/db/database-mode";
 
-const LOCAL_DB_PATH = join(process.cwd(), "data", "pglite");
-const INIT_SQL_PATH = join(process.cwd(), "prisma", "sql", "init.sql");
+function getLocalDbPath(): string {
+  return resolve(resolveProjectRoot(), "data", "pglite");
+}
+
+function getInitSqlPath(): string {
+  return join(resolveProjectRoot(), "prisma", "sql", "init.sql");
+}
 
 let pglite: PGlite | null = null;
 let initialized = false;
 let initPromise: Promise<PGlite> | null = null;
+let dbOperationChain: Promise<unknown> = Promise.resolve();
+
+const OPEN_MAX_ATTEMPTS = 10;
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isAbortedError(error: unknown): boolean {
-  const message =
-    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
-  return message.includes("aborted");
+function isAbortedError(error: unknown): boolean {
+  return getErrorMessage(error).toLowerCase().includes("aborted");
+}
+
+function isMissingDatabaseError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+
+  return message.includes("enoent") || message.includes("no such file");
+}
+
+function isRetryableOpenError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+
+  return (
+    isAbortedError(error) ||
+    message.includes("locked") ||
+    message.includes("busy") ||
+    message.includes("resource")
+  );
+}
+
+export function withLocalDbExclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const run = dbOperationChain.then(fn, fn);
+  dbOperationChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
 async function applySchema(db: PGlite): Promise<void> {
-  const sql = readFileSync(INIT_SQL_PATH, "utf8");
+  const sql = readFileSync(getInitSqlPath(), "utf8");
   await db.exec(sql);
 }
 
-async function closePgliteInstance(instance: PGlite | null): Promise<void> {
+export async function closePgliteInstance(instance: PGlite | null): Promise<void> {
   if (!instance) {
     return;
   }
@@ -44,30 +80,57 @@ export function invalidateLocalDatabase(): void {
   initPromise = null;
   initialized = false;
   pglite = null;
-  resetLocalPrismaClient();
+
+  void import("@/lib/prisma").then(({ resetLocalPrismaClient }) => {
+    resetLocalPrismaClient();
+  });
 
   void import("@/lib/db").then(({ resetDbReadyState }) => {
     resetDbReadyState();
   });
 }
 
-async function recoverLocalDatabase(cause: unknown): Promise<PGlite> {
+async function createFreshPgliteInstance(localDbPath: string): Promise<PGlite> {
+  for (let attempt = 1; attempt <= OPEN_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const db = await PGlite.create(localDbPath);
+      await db.query("SELECT 1 AS ok");
+      return db;
+    } catch (error) {
+      const shouldRetry =
+        attempt < OPEN_MAX_ATTEMPTS && isRetryableOpenError(error);
+
+      if (shouldRetry) {
+        console.warn(
+          `[local-pglite] Open attempt ${attempt}/${OPEN_MAX_ATTEMPTS} failed (${getErrorMessage(error)}), retrying…`,
+        );
+        await wait(300 * attempt);
+        continue;
+      }
+
+      if (isMissingDatabaseError(error)) {
+        return initializeMissingDatabase(localDbPath);
+      }
+
+      throw new Error(
+        `[local-pglite] Failed to open database after ${attempt} attempt(s): ${getErrorMessage(error)}`,
+        { cause: error },
+      );
+    }
+  }
+
+  throw new Error("Failed to open local PGlite database.");
+}
+
+async function initializeMissingDatabase(localDbPath: string): Promise<PGlite> {
   console.warn(
-    "[local-pglite] Recovering local database after open failure:",
-    cause instanceof Error ? cause.message : cause,
+    "[local-pglite] Database files missing, creating a new local database:",
+    localDbPath,
   );
 
-  const previous = pglite;
-  invalidateLocalDatabase();
-  await closePgliteInstance(previous);
+  mkdirSync(localDbPath, { recursive: true });
 
-  const { resetDbReadyState } = await import("@/lib/db");
-  resetDbReadyState();
-
-  rmSync(LOCAL_DB_PATH, { recursive: true, force: true });
-  mkdirSync(dirname(LOCAL_DB_PATH), { recursive: true });
-
-  const db = await PGlite.create(LOCAL_DB_PATH);
+  const db = await PGlite.create(localDbPath);
   await applySchema(db);
   await db.query("SELECT 1 AS ok");
   initialized = true;
@@ -77,7 +140,8 @@ async function recoverLocalDatabase(cause: unknown): Promise<PGlite> {
 }
 
 async function openPgliteDatabase(): Promise<PGlite> {
-  mkdirSync(dirname(LOCAL_DB_PATH), { recursive: true });
+  const localDbPath = getLocalDbPath();
+  mkdirSync(localDbPath, { recursive: true });
 
   if (pglite) {
     try {
@@ -86,36 +150,32 @@ async function openPgliteDatabase(): Promise<PGlite> {
     } catch (error) {
       console.warn(
         "[local-pglite] Existing instance failed health check, reopening:",
-        error instanceof Error ? error.message : error,
+        getErrorMessage(error),
       );
       await closePgliteInstance(pglite);
       pglite = null;
     }
   }
 
-  const maxAttempts = 3;
+  return createFreshPgliteInstance(localDbPath);
+}
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      const db = await PGlite.create(LOCAL_DB_PATH);
-      await db.query("SELECT 1 AS ok");
-      return db;
-    } catch (error) {
-      const shouldRetry = attempt < maxAttempts && isAbortedError(error);
+async function reopenLocalDatabaseConnectionInternal(): Promise<void> {
+  const previous = pglite;
+  await closePgliteInstance(previous);
 
-      if (shouldRetry) {
-        console.warn(
-          `[local-pglite] Open attempt ${attempt} failed with Aborted(), retrying…`,
-        );
-        await wait(250 * attempt);
-        continue;
-      }
+  pglite = null;
+  initPromise = null;
+  initialized = true;
 
-      return recoverLocalDatabase(error);
-    }
-  }
+  const { initializeLocalPrisma, resetLocalPrismaClient } = await import(
+    "@/lib/prisma"
+  );
+  resetLocalPrismaClient();
 
-  throw new Error("Failed to open local PGlite database.");
+  const db = await openPgliteDatabase();
+  pglite = db;
+  initializeLocalPrisma(db);
 }
 
 export async function getLocalPglite(): Promise<PGlite> {
@@ -158,8 +218,27 @@ export async function initLocalDatabase(): Promise<PGlite> {
   return getLocalPglite();
 }
 
-export function isLocalDatabaseEnabled(): boolean {
-  return process.env.USE_LOCAL_DB === "true";
+/**
+ * Re-open the on-disk PGlite connection so reads see writes from other
+ * processes (e.g. Trigger.dev worker) during local dev.
+ */
+export async function reopenLocalDatabaseConnection(): Promise<void> {
+  if (!isLocalDatabaseEnabled()) {
+    return;
+  }
+
+  await withLocalDbExclusive(reopenLocalDatabaseConnectionInternal);
 }
 
-export { LOCAL_DB_PATH };
+export { reopenLocalDatabaseConnectionInternal };
+
+/** @deprecated Use reopenLocalDatabaseConnection instead. */
+export async function refreshLocalDatabaseConnection(): Promise<void> {
+  return reopenLocalDatabaseConnection();
+}
+
+export { isLocalDatabaseEnabled } from "@/lib/db/database-mode";
+
+export function getLocalDatabasePath(): string {
+  return getLocalDbPath();
+}

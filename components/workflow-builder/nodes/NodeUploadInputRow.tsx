@@ -1,21 +1,22 @@
 "use client";
 
-import { Info, Plus } from "lucide-react";
+import { Info, Plus, Upload } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { NodeHandle } from "./NodeHandle";
+import { NodeDecorativeHandle } from "./NodeDecorativeHandle";
 
-type NodeInputFieldProps = {
+type UploadHandleColor = "image" | "green" | "cyan" | "purple";
+
+type NodeUploadInputRowProps = {
   label: string;
-  required?: boolean;
-  placeholder?: string;
-  value: string;
-  disabled?: boolean;
+  buttonLabel: string;
   connected?: boolean;
-  minRows?: number;
+  connectedText?: string;
   handleId?: string;
-  handleType?: "target" | "source";
-  onChange: (value: string) => void;
+  decorativeColor?: UploadHandleColor;
   onAddConnection?: () => void;
+  onUploadClick?: () => void;
+  disabled?: boolean;
   className?: string;
   dense?: boolean;
 };
@@ -24,21 +25,21 @@ function stopNodePointer(event: React.SyntheticEvent) {
   event.stopPropagation();
 }
 
-export function NodeInputField({
+export function NodeUploadInputRow({
   label,
-  required = false,
-  placeholder,
-  value,
-  disabled = false,
+  buttonLabel,
   connected = false,
-  minRows = 2,
+  connectedText = "Input connected",
   handleId,
-  handleType = "target",
-  onChange,
+  decorativeColor,
   onAddConnection,
+  onUploadClick,
+  disabled = false,
   className,
   dense = false,
-}: NodeInputFieldProps) {
+}: NodeUploadInputRowProps) {
+  const showFunctionalHandle = Boolean(handleId);
+
   return (
     <div
       className={cn(
@@ -46,16 +47,13 @@ export function NodeInputField({
         className,
       )}
     >
-      {handleId ? (
-        <div
-          className={cn(
-            "workflow-handle-slot",
-            handleType === "source"
-              ? "workflow-handle-slot-right"
-              : "workflow-handle-slot-left",
-          )}
-        >
-          <NodeHandle id={handleId} type={handleType} inline />
+      {showFunctionalHandle ? (
+        <div className="workflow-handle-slot workflow-handle-slot-left">
+          <NodeHandle id={handleId!} type="target" inline />
+        </div>
+      ) : decorativeColor ? (
+        <div className="workflow-handle-slot workflow-handle-slot-left pointer-events-none">
+          <NodeDecorativeHandle color={decorativeColor} />
         </div>
       ) : null}
 
@@ -67,10 +65,7 @@ export function NodeInputField({
           )}
         >
           <div className="flex min-w-0 items-center gap-1">
-            <span className="workflow-node-field-label truncate">
-              {label}
-              {required ? <span className="text-red-500">*</span> : null}
-            </span>
+            <span className="workflow-node-field-label truncate">{label}</span>
             <button
               type="button"
               className="workflow-node-field-info"
@@ -104,34 +99,24 @@ export function NodeInputField({
           ) : null}
         </div>
 
-        <textarea
-          value={value}
+        <button
+          type="button"
           disabled={disabled || connected}
-          placeholder={placeholder}
-          rows={dense ? 1 : minRows}
-          onChange={(event) => onChange(event.target.value)}
+          onClick={(event) => {
+            stopNodePointer(event);
+            onUploadClick?.();
+          }}
+          onMouseDown={stopNodePointer}
           onPointerDown={stopNodePointer}
           className={cn(
-            "workflow-node-prompt-field w-full resize-y",
-            dense
-              ? "min-h-[38px]"
-              : minRows <= 2
-                ? "min-h-[52px]"
-                : "min-h-[72px]",
-            (disabled || connected) && "opacity-80",
+            "workflow-node-upload-btn w-full",
+            dense && "workflow-node-upload-btn-dense",
+            (disabled || connected) && "opacity-75",
           )}
-        />
-
-        {connected ? (
-          <p
-            className={cn(
-              "text-[10px] text-muted-foreground",
-              dense ? "mt-0.5" : "mt-1",
-            )}
-          >
-            Connected — manual input disabled.
-          </p>
-        ) : null}
+        >
+          <Upload className="h-3.5 w-3.5 shrink-0" />
+          <span>{connected ? connectedText : buttonLabel}</span>
+        </button>
       </div>
     </div>
   );

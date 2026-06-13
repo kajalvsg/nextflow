@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Copy,
+  Info,
   Link2,
   Loader2,
   Lock,
@@ -27,11 +28,14 @@ type NodeCardShellProps = {
   executionStatus?: NodeRuntimeStatus;
   showRunButton?: boolean;
   showRefreshButton?: boolean;
+  showInfoIcon?: boolean;
+  showHeaderIcon?: boolean;
   headerVariant?: "default" | "model";
+  headerActions?: React.ReactNode;
+  compact?: boolean;
+  dense?: boolean;
   className?: string;
   handles?: React.ReactNode;
-  leftGutter?: boolean;
-  rightGutter?: boolean;
   children: React.ReactNode;
 };
 
@@ -56,11 +60,14 @@ export function NodeCardShell({
   executionStatus = "idle",
   showRunButton = true,
   showRefreshButton = true,
+  showInfoIcon = false,
+  showHeaderIcon = true,
   headerVariant = "default",
+  headerActions,
+  compact = true,
+  dense = false,
   className,
   handles,
-  leftGutter = false,
-  rightGutter = false,
   children,
 }: NodeCardShellProps) {
   const {
@@ -110,39 +117,63 @@ export function NodeCardShell({
     }
   };
 
+  const showMenu = showRunButton || showRefreshButton;
+
   return (
     <div
       className={cn(
-        "workflow-node-card relative overflow-visible rounded-xl border-2 bg-surface shadow-card transition-[border-color,box-shadow] duration-150",
+        "workflow-node-card relative overflow-visible rounded-[10px] border bg-surface shadow-card transition-[border-color,box-shadow] duration-150",
         selected || executionStatus !== "idle"
           ? "workflow-node-card-active"
-          : "border-border",
+          : "border-border-soft",
         executionStatus === "running" && "workflow-node-running",
         executionStatus === "success" && "workflow-node-success",
         executionStatus === "failed" && "workflow-node-failed",
         locked && "workflow-node-card-locked",
+        compact && "workflow-node-card-compact",
+        dense && "workflow-node-card-dense",
         className,
       )}
     >
       {handles}
 
-      <div className="flex items-center gap-1.5 border-b border-border-soft px-3 py-2.5">
-        {headerVariant === "default" && Icon ? (
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-surface-muted text-muted">
-            <Icon className="h-3.5 w-3.5" />
+      <div
+        className={cn(
+          "flex items-center gap-1 border-b border-border-soft",
+          dense ? "px-2 py-1.5" : compact ? "px-2.5 py-2" : "px-3 py-2.5",
+        )}
+      >
+        {headerVariant === "default" && showHeaderIcon && Icon ? (
+          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-surface-muted text-muted">
+            <Icon className="h-3 w-3" />
           </div>
         ) : null}
 
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium leading-tight text-foreground">
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          <p className="truncate text-[12px] font-semibold leading-tight text-foreground">
             {title}
           </p>
+          {showInfoIcon ? (
+            <button
+              type="button"
+              className="workflow-node-field-info shrink-0"
+              aria-label={`${title} information`}
+              onMouseDown={stopNodePointer}
+              onPointerDown={stopNodePointer}
+            >
+              <Info className="h-3 w-3" />
+            </button>
+          ) : null}
           {headerVariant === "default" && subtitle ? (
             <p className="truncate text-[10px] font-normal leading-tight text-muted-foreground">
               {subtitle}
             </p>
           ) : null}
         </div>
+
+        {headerActions ? (
+          <div className="flex shrink-0 items-center gap-0.5">{headerActions}</div>
+        ) : null}
 
         {showRefreshButton ? (
           <button
@@ -157,7 +188,7 @@ export function NodeCardShell({
             onMouseDown={stopNodePointer}
             onPointerDown={stopNodePointer}
           >
-            <RefreshCw className="h-3.5 w-3.5" />
+            <RefreshCw className="h-3 w-3" />
           </button>
         ) : null}
 
@@ -185,70 +216,78 @@ export function NodeCardShell({
           </button>
         ) : null}
 
-        <div className="relative shrink-0" ref={menuRef}>
-          <button
-            type="button"
-            className="workflow-node-header-icon"
-            aria-label="Node menu"
-            onClick={(event) => {
-              stopNodePointer(event);
-              setMenuOpen((current) => !current);
-            }}
-            onMouseDown={stopNodePointer}
-            onPointerDown={stopNodePointer}
-          >
-            <MoreHorizontal className="h-3.5 w-3.5" />
-          </button>
+        {showMenu ? (
+          <div className="relative shrink-0" ref={menuRef}>
+            <button
+              type="button"
+              className="workflow-node-header-icon"
+              aria-label="Node menu"
+              onClick={(event) => {
+                stopNodePointer(event);
+                setMenuOpen((current) => !current);
+              }}
+              onMouseDown={stopNodePointer}
+              onPointerDown={stopNodePointer}
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
 
-          {menuOpen ? (
-            <div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-elevated">
-              {MENU_ITEMS.map((item) => {
-                const MenuIcon = item.icon;
-                const label =
-                  item.id === "lock"
-                    ? locked
-                      ? "Unlock"
-                      : "Lock"
-                    : item.label;
+            {menuOpen ? (
+              <div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-elevated">
+                {MENU_ITEMS.map((item) => {
+                  const MenuIcon = item.icon;
+                  const label =
+                    item.id === "lock"
+                      ? locked
+                        ? "Unlock"
+                        : "Lock"
+                      : item.label;
 
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground transition-colors hover:bg-surface-hover"
-                    onClick={(event) => {
-                      stopNodePointer(event);
-                      handleMenuAction(item.id);
-                    }}
-                    onMouseDown={stopNodePointer}
-                    onPointerDown={stopNodePointer}
-                  >
-                    {item.id === "lock" && locked ? (
-                      <Unlock className="h-3.5 w-3.5 text-muted" />
-                    ) : (
-                      <MenuIcon
-                        className={cn(
-                          "h-3.5 w-3.5",
-                          item.id === "delete" ? "text-red-500" : "text-muted",
-                        )}
-                      />
-                    )}
-                    <span
-                      className={item.id === "delete" ? "text-red-500" : undefined}
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground transition-colors hover:bg-surface-hover"
+                      onClick={(event) => {
+                        stopNodePointer(event);
+                        handleMenuAction(item.id);
+                      }}
+                      onMouseDown={stopNodePointer}
+                      onPointerDown={stopNodePointer}
                     >
-                      {label}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
+                      {item.id === "lock" && locked ? (
+                        <Unlock className="h-3.5 w-3.5 text-muted" />
+                      ) : (
+                        <MenuIcon
+                          className={cn(
+                            "h-3.5 w-3.5",
+                            item.id === "delete"
+                              ? "text-red-500"
+                              : "text-muted",
+                          )}
+                        />
+                      )}
+                      <span
+                        className={
+                          item.id === "delete" ? "text-red-500" : undefined
+                        }
+                      >
+                        {label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div
         className={cn(
-          "workflow-node-body stack-sm overflow-visible px-3 py-3",
+          "workflow-node-body overflow-visible",
+          dense ? "workflow-node-body-dense" : "stack-sm",
+          dense ? "px-2 py-1.5" : compact ? "px-2.5 py-2" : "px-3 py-3",
         )}
       >
         {children}

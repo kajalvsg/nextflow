@@ -1,29 +1,20 @@
 import type { Connection, Edge, Node } from "reactflow";
+import {
+  getRequestInputField,
+  normalizeRequestInputsConfig,
+} from "@/lib/workflow/request-inputs-fields";
 import type { WorkflowNodeData, WorkflowNodeType } from "@/types/workflow-canvas";
 
 export type HandleDataType = "text" | "image";
 
-type HandleRole = "source" | "target";
-
 type HandleDefinition = {
   dataType: HandleDataType;
   allowedTargets?: string[];
-  allowedSources?: string[];
 };
 
-const SOURCE_HANDLES: Partial<
+const STATIC_SOURCE_HANDLES: Partial<
   Record<WorkflowNodeType, Record<string, HandleDefinition>>
 > = {
-  requestInputs: {
-    text_field: {
-      dataType: "text",
-      allowedTargets: ["prompt", "system_prompt", "result"],
-    },
-    image_field: {
-      dataType: "image",
-      allowedTargets: ["input_image", "image_vision"],
-    },
-  },
   cropImage: {
     output_image: {
       dataType: "image",
@@ -54,6 +45,9 @@ const TARGET_HANDLES: Partial<
   },
 };
 
+const TEXT_OUTPUT_TARGETS = ["prompt", "system_prompt", "result"] as const;
+const IMAGE_OUTPUT_TARGETS = ["input_image", "image_vision"] as const;
+
 function getNodeType(
   nodes: Node<WorkflowNodeData>[],
   nodeId: string | null | undefined,
@@ -63,12 +57,52 @@ function getNodeType(
   return node?.data.nodeType ?? null;
 }
 
+function getRequestInputsSourceDefinition(
+  nodes: Node<WorkflowNodeData>[],
+  nodeId: string,
+  handleId: string,
+): HandleDefinition | null {
+  const node = nodes.find((item) => item.id === nodeId);
+
+  if (!node || node.data.nodeType !== "requestInputs") {
+    return null;
+  }
+
+  const config = normalizeRequestInputsConfig(node.data.config);
+  const field = getRequestInputField(config, handleId);
+
+  if (!field) {
+    return null;
+  }
+
+  if (field.type === "text_field") {
+    return {
+      dataType: "text",
+      allowedTargets: [...TEXT_OUTPUT_TARGETS],
+    };
+  }
+
+  return {
+    dataType: "image",
+    allowedTargets: [...IMAGE_OUTPUT_TARGETS],
+  };
+}
+
 function getSourceDefinition(
-  nodeType: WorkflowNodeType | null,
+  nodes: Node<WorkflowNodeData>[],
+  nodeId: string | null | undefined,
   handleId: string | null | undefined,
 ): HandleDefinition | null {
-  if (!nodeType || !handleId) return null;
-  return SOURCE_HANDLES[nodeType]?.[handleId] ?? null;
+  if (!nodeId || !handleId) return null;
+
+  const nodeType = getNodeType(nodes, nodeId);
+
+  if (nodeType === "requestInputs") {
+    return getRequestInputsSourceDefinition(nodes, nodeId, handleId);
+  }
+
+  if (!nodeType) return null;
+  return STATIC_SOURCE_HANDLES[nodeType]?.[handleId] ?? null;
 }
 
 function getTargetDefinition(
@@ -99,9 +133,8 @@ export function validateWorkflowConnection(
     return { valid: false, reason: "A node cannot connect to itself." };
   }
 
-  const sourceNodeType = getNodeType(nodes, source);
   const targetNodeType = getNodeType(nodes, target);
-  const sourceDef = getSourceDefinition(sourceNodeType, sourceHandle);
+  const sourceDef = getSourceDefinition(nodes, source, sourceHandle);
   const targetDef = getTargetDefinition(targetNodeType, targetHandle);
 
   if (!sourceDef) {

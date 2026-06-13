@@ -15,9 +15,18 @@ export type ImageFieldState = {
   size: number | null;
 };
 
+export type RequestInputFieldType = "text_field" | "image_field";
+
+export type RequestInputField = {
+  id: string;
+  label: string;
+  type: RequestInputFieldType;
+  textValue?: string;
+  imageValue?: ImageFieldState;
+};
+
 export type RequestInputsConfig = {
-  textField: string;
-  imageField: ImageFieldState;
+  fields: RequestInputField[];
 };
 
 export type CropImageConfig = {

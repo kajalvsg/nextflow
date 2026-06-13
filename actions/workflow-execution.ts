@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { tasks } from "@trigger.dev/sdk/v3";
 import { z } from "zod";
-import { db, ensureDbReady } from "@/lib/db";
+import { db, ensureDbReady, withFreshLocalRead } from "@/lib/db";
 import { parseStoredGraph } from "@/lib/workflow/canvas";
 import { prepareGraphPayload } from "@/lib/workflow/graph-payload";
 import { planExecutionNodeIds } from "@/lib/workflow/execution/dag";
@@ -100,31 +100,21 @@ function mapSnapshotsToInlineState(
   );
 }
 
-export async function getLatestWorkflowInlineExecutions(
-  workflowId: string,
-): Promise<Record<string, NodeInlineExecutionState>> {
-  await ensureDbReady();
-  const userId = await requireUserId();
-
-  const run = await db.workflowRun.findFirst({
-    where: {
-      workflowId,
-      userId,
-      status: { not: "running" },
-    },
-    orderBy: { startedAt: "desc" },
-    include: {
-      executions: {
-        orderBy: { startedAt: "asc" },
-      },
-    },
-  });
-
-  if (!run) {
-    return {};
-  }
-
-  const executions = run.executions.map(
+function mapRunExecutions(
+  executions: Array<{
+    id: string;
+    nodeId: string;
+    nodeType: string;
+    status: string;
+    input: unknown;
+    output: unknown;
+    error: string | null;
+    startedAt: Date;
+    endedAt: Date | null;
+    durationMs: number | null;
+  }>,
+): NodeExecutionDetail[] {
+  return executions.map(
     (execution): NodeExecutionDetail => ({
       id: execution.id,
       nodeId: execution.nodeId,
@@ -139,8 +129,35 @@ export async function getLatestWorkflowInlineExecutions(
       durationMs: execution.durationMs,
     }),
   );
+}
 
-  return mapSnapshotsToInlineState(mapExecutionsToSnapshots(executions));
+export async function getLatestWorkflowInlineExecutions(
+  workflowId: string,
+): Promise<Record<string, NodeInlineExecutionState>> {
+  const userId = await requireUserId();
+
+  return withFreshLocalRead(async (client) => {
+    const run = await client.workflowRun.findFirst({
+      where: {
+        workflowId,
+        userId,
+        status: { not: "running" },
+      },
+      orderBy: { startedAt: "desc" },
+      include: {
+        executions: {
+          orderBy: { startedAt: "asc" },
+        },
+      },
+    });
+
+    if (!run) {
+      return {};
+    }
+
+    const executions = mapRunExecutions(run.executions);
+    return mapSnapshotsToInlineState(mapExecutionsToSnapshots(executions));
+  });
 }
 
 export async function startWorkflowRun(
@@ -238,75 +255,65 @@ export async function startWorkflowRun(
 export async function getWorkflowRunHistory(
   workflowId: string,
 ): Promise<WorkflowRunSummary[]> {
-  await ensureDbReady();
   const userId = await requireUserId();
 
-  const runs = await db.workflowRun.findMany({
-    where: { workflowId, userId },
-    orderBy: { startedAt: "desc" },
-    include: {
-      _count: {
-        select: { executions: true },
+  return withFreshLocalRead(async (client) => {
+    const runs = await client.workflowRun.findMany({
+      where: { workflowId, userId },
+      orderBy: { startedAt: "desc" },
+      include: {
+        _count: {
+          select: { executions: true },
+        },
       },
-    },
-  });
+    });
 
-  return runs.map((run) => ({
-    id: run.id,
-    workflowId: run.workflowId,
-    status: run.status as WorkflowRunSummary["status"],
-    scope: run.scope as WorkflowRunSummary["scope"],
-    startedAt: run.startedAt.toISOString(),
-    endedAt: run.endedAt?.toISOString() ?? null,
-    durationMs: run.durationMs,
-    executionCount: run._count.executions,
-  }));
+    return runs.map((run) => ({
+      id: run.id,
+      workflowId: run.workflowId,
+      status: run.status as WorkflowRunSummary["status"],
+      scope: run.scope as WorkflowRunSummary["scope"],
+      startedAt: run.startedAt.toISOString(),
+      endedAt: run.endedAt?.toISOString() ?? null,
+      durationMs: run.durationMs,
+      executionCount: run._count.executions,
+    }));
+  });
 }
 
 export async function getWorkflowRunDetail(
   runId: string,
 ): Promise<WorkflowRunDetail | null> {
-  await ensureDbReady();
   const userId = await requireUserId();
 
-  const run = await db.workflowRun.findFirst({
-    where: { id: runId, userId },
-    include: {
-      executions: {
-        orderBy: { startedAt: "asc" },
+  return withFreshLocalRead(async (client) => {
+    const run = await client.workflowRun.findFirst({
+      where: { id: runId, userId },
+      include: {
+        executions: {
+          orderBy: { startedAt: "asc" },
+        },
       },
-    },
+    });
+
+    if (!run) {
+      return null;
+    }
+
+    const executions = mapRunExecutions(run.executions);
+
+    return {
+      id: run.id,
+      workflowId: run.workflowId,
+      status: run.status as WorkflowRunDetail["status"],
+      scope: run.scope as WorkflowRunDetail["scope"],
+      startedAt: run.startedAt.toISOString(),
+      endedAt: run.endedAt?.toISOString() ?? null,
+      durationMs: run.durationMs,
+      executionCount: executions.length,
+      executions,
+    };
   });
-
-  if (!run) {
-    return null;
-  }
-
-  return {
-    id: run.id,
-    workflowId: run.workflowId,
-    status: run.status as WorkflowRunDetail["status"],
-    scope: run.scope as WorkflowRunDetail["scope"],
-    startedAt: run.startedAt.toISOString(),
-    endedAt: run.endedAt?.toISOString() ?? null,
-    durationMs: run.durationMs,
-    executionCount: run.executions.length,
-    executions: run.executions.map(
-      (execution): NodeExecutionDetail => ({
-        id: execution.id,
-        nodeId: execution.nodeId,
-        nodeType: execution.nodeType,
-        nodeName: nodeDisplayName(execution.nodeType, execution.nodeId),
-        status: execution.status as NodeExecutionDetail["status"],
-        input: execution.input,
-        output: execution.output,
-        error: execution.error,
-        startedAt: execution.startedAt.toISOString(),
-        endedAt: execution.endedAt?.toISOString() ?? null,
-        durationMs: execution.durationMs,
-      }),
-    ),
-  };
 }
 
 export async function getActiveRunState(

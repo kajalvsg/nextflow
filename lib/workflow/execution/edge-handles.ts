@@ -1,4 +1,8 @@
 import type { Edge, Node } from "reactflow";
+import {
+  findFirstRequestFieldId,
+  normalizeRequestInputsConfig,
+} from "@/lib/workflow/request-inputs-fields";
 import type { WorkflowNodeData } from "@/types/workflow-canvas";
 
 function getNodeType(
@@ -30,14 +34,19 @@ export function normalizeEdgeForResolution(
   }
 
   if (!sourceHandle && sourceType === "requestInputs") {
+    const sourceNode = nodes.find((node) => node.id === edge.source);
+    const config = normalizeRequestInputsConfig(sourceNode?.data.config);
+
     if (targetHandle === "input_image" || targetHandle === "image_vision") {
-      sourceHandle = "image_field";
+      sourceHandle =
+        findFirstRequestFieldId(config, "image_field") ?? "image_field";
     } else if (
       targetHandle === "prompt" ||
       targetHandle === "system_prompt" ||
       targetHandle === "result"
     ) {
-      sourceHandle = "text_field";
+      sourceHandle =
+        findFirstRequestFieldId(config, "text_field") ?? "text_field";
     }
   }
 

@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { normalizeImageInputUrl } from "@/lib/workflow/execution/image-input";
 
 export type CropImageInput = {
   input_image?: string | null;
@@ -20,22 +21,70 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function loadImageBuffer(inputImage: string): Promise<Buffer> {
+  const trimmed = inputImage.trim();
+
+  if (trimmed.startsWith("data:image/")) {
+    const base64 = trimmed.split(",")[1];
+
+    if (!base64) {
+      throw new Error("Invalid image data URL.");
+    }
+
+    return Buffer.from(base64, "base64");
+  }
+
+  const fetchUrl = normalizeImageInputUrl(trimmed) ?? trimmed;
+
+  try {
+    const response = await fetch(fetchUrl);
+
+    if (!response.ok) {
+      throw new Error(
+        `Unable to fetch input image (HTTP ${response.status}). Check that the URL is valid and publicly accessible.`,
+      );
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+
+    if (contentType && !contentType.startsWith("image/")) {
+      throw new Error(
+        "The input URL did not return an image. Provide a direct image URL or upload an image file.",
+      );
+    }
+
+    return Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Unable to fetch")) {
+      throw error;
+    }
+
+    if (error instanceof Error && error.message.startsWith("The input URL")) {
+      throw error;
+    }
+
+    throw new Error(
+      "Invalid image URL or unable to reach the image server. Check the URL and try again.",
+    );
+  }
+}
+
 export async function executeCropImage(
   input: CropImageInput,
 ): Promise<CropImageOutput> {
   const startedAt = Date.now();
 
-  if (!input.input_image) {
-    throw new Error("Crop Image requires a connected input image.");
+  if (!input.input_image?.trim()) {
+    throw new Error("Crop Image requires a connected input image or image URL.");
   }
 
-  const response = await fetch(input.input_image);
+  const normalizedInput = normalizeImageInputUrl(input.input_image);
 
-  if (!response.ok) {
-    throw new Error(`Unable to fetch input image (${response.status}).`);
+  if (!normalizedInput) {
+    throw new Error("Crop Image requires a valid uploaded image or image URL.");
   }
 
-  const buffer = Buffer.from(await response.arrayBuffer());
+  const buffer = await loadImageBuffer(normalizedInput);
   const image = sharp(buffer);
   const metadata = await image.metadata();
 

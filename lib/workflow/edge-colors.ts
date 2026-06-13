@@ -33,7 +33,7 @@ export function getEdgeColorKind(
     return "text";
   }
 
-  if (IMAGE_HANDLES.has(handleId)) {
+  if (IMAGE_HANDLES.has(handleId) || handleId.startsWith("image_field")) {
     return "image";
   }
 
@@ -41,7 +41,7 @@ export function getEdgeColorKind(
     return "pink";
   }
 
-  if (TEXT_HANDLES.has(handleId)) {
+  if (TEXT_HANDLES.has(handleId) || handleId.startsWith("text_field")) {
     return "text";
   }
 

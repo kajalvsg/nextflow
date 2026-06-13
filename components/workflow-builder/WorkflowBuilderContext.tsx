@@ -23,6 +23,12 @@ type WorkflowBuilderContextValue = {
   isWorkflowRunning: boolean;
   runNode: (nodeId: string) => void;
   removeEdge: (edgeId: string) => void;
+  removeEdgesForSourceHandle: (nodeId: string, handleId: string) => void;
+  remapSourceHandle: (
+    nodeId: string,
+    oldHandleId: string,
+    newHandleId: string,
+  ) => void;
   refreshNode: (nodeId: string) => void;
   duplicateNode: (nodeId: string) => void;
   duplicateNodeWithEdges: (nodeId: string) => void;

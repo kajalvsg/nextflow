@@ -1,17 +1,15 @@
 "use client";
 
-import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BookOpen,
   Boxes,
   GitBranch,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Gift,
   Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Search,
   Settings,
@@ -23,6 +21,7 @@ import { siteConfig } from "@/config/site";
 import { CLERK_AUTH_PATHS } from "@/lib/clerk/config";
 import { cn } from "@/lib/utils/cn";
 import { useAppSidebarActions } from "./AppSidebarActionsContext";
+import { SidebarAccountSection } from "./SidebarAccountSection";
 import { useSidebarLayout } from "./SidebarLayoutContext";
 
 type NavItem = {
@@ -105,16 +104,9 @@ function SidebarNavLink({
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const { user } = useUser();
   const { onNewTask, isNewTaskPending } = useAppSidebarActions();
   const { collapsed, toggleCollapsed } = useSidebarLayout();
   const activeId = getActiveNavId(pathname);
-
-  const displayName =
-    user?.fullName ?? user?.firstName ?? user?.username ?? "User";
-  const email =
-    user?.primaryEmailAddress?.emailAddress ?? "Signed in";
-  const initial = displayName.charAt(0).toUpperCase();
 
   return (
     <aside
@@ -123,44 +115,36 @@ export function AppSidebar() {
         collapsed ? "app-sidebar-collapsed w-[72px]" : "w-[260px]",
       )}
     >
+      <button
+        type="button"
+        onClick={toggleCollapsed}
+        className="app-sidebar-toggle-btn"
+        aria-label={collapsed ? "Open sidebar" : "Close sidebar"}
+        title={collapsed ? "Open sidebar" : "Close sidebar"}
+      >
+        {collapsed ? (
+          <PanelLeftOpen className="app-sidebar-toggle-icon" />
+        ) : (
+          <PanelLeftClose className="app-sidebar-toggle-icon" />
+        )}
+      </button>
+
       <div
         className={cn(
-          "flex items-center justify-between gap-2",
-          collapsed ? "px-3 pb-3 pt-4" : "px-4 pb-3 pt-4",
+          "app-sidebar-header",
+          collapsed ? "app-sidebar-header-collapsed" : undefined,
         )}
       >
         <Link
           href={CLERK_AUTH_PATHS.afterAuth}
           className={cn(
             "app-sidebar-logo min-w-0 truncate text-foreground",
-            collapsed ? "mx-auto text-center text-sm" : undefined,
+            collapsed ? "mx-auto block text-center text-sm" : undefined,
           )}
           title={siteConfig.name}
         >
           {collapsed ? siteConfig.name.charAt(0) : siteConfig.name}
         </Link>
-
-        {!collapsed ? (
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            className="app-sidebar-collapse-btn flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
-            aria-label="Collapse sidebar"
-            title="Collapse sidebar"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            className="app-sidebar-collapse-btn absolute right-2 top-4 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
-            aria-label="Expand sidebar"
-            title="Expand sidebar"
-          >
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
-        )}
       </div>
 
       <nav className="shrink-0 px-3">
@@ -245,41 +229,7 @@ export function AppSidebar() {
           </button>
         )}
 
-        {!collapsed ? (
-          <div className="app-sidebar-footer-chevron" aria-hidden="true">
-            <ChevronDown className="h-3.5 w-3.5" />
-          </div>
-        ) : null}
-
-        <div
-          className={cn(
-            "app-sidebar-profile",
-            collapsed && "app-sidebar-profile-collapsed",
-          )}
-        >
-          {user?.imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={user.imageUrl}
-              alt={displayName}
-              className="app-sidebar-profile-avatar"
-              title={collapsed ? displayName : undefined}
-            />
-          ) : (
-            <div
-              className="app-sidebar-profile-avatar app-sidebar-profile-avatar-fallback"
-              title={collapsed ? displayName : undefined}
-            >
-              {initial}
-            </div>
-          )}
-          {!collapsed ? (
-            <div className="min-w-0 flex-1">
-              <p className="app-sidebar-profile-name truncate">{displayName}</p>
-              <p className="app-sidebar-profile-email truncate">{email}</p>
-            </div>
-          ) : null}
-        </div>
+        <SidebarAccountSection collapsed={collapsed} />
       </div>
     </aside>
   );

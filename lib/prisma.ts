@@ -5,7 +5,11 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { PrismaPGlite } from "pglite-prisma-adapter";
 import { getPgPoolConfig } from "@/lib/db/connection";
-import { isLocalDatabaseEnabled } from "@/lib/db/local-pglite";
+import {
+  getDatabaseMode,
+  hasPostgresDatabaseUrl,
+  isLocalDatabaseEnabled,
+} from "@/lib/db/database-mode";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -22,7 +26,7 @@ function createRemotePrismaClient(): PrismaClient {
   });
 }
 
-function createLocalPrismaClient(pglite: PGlite): PrismaClient {
+export function createLocalPrismaClient(pglite: PGlite): PrismaClient {
   const adapter = new PrismaPGlite(
     pglite,
   ) as unknown as NonNullable<Prisma.PrismaClientOptions["adapter"]>;
@@ -84,7 +88,9 @@ function getRemotePrismaClient(): PrismaClient {
 }
 
 if (!isLocalDatabaseEnabled()) {
-  getRemotePrismaClient();
+  if (hasPostgresDatabaseUrl()) {
+    getRemotePrismaClient();
+  }
 }
 
 function getActivePrismaClient(): PrismaClient {
@@ -96,6 +102,12 @@ function getActivePrismaClient(): PrismaClient {
     }
 
     return globalForPrisma.prisma;
+  }
+
+  if (!hasPostgresDatabaseUrl()) {
+    throw new Error(
+      "DATABASE_URL is not set. Add a postgresql:// connection string to .env.local or enable local PGlite with USE_LOCAL_DB=true.",
+    );
   }
 
   return getRemotePrismaClient();
@@ -113,5 +125,7 @@ export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
     return value;
   },
 });
+
+export { getDatabaseMode, hasPostgresDatabaseUrl, isLocalDatabaseEnabled };
 
 export default prisma;

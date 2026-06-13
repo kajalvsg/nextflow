@@ -5,7 +5,11 @@ import {
   parseStoredGraph,
   sanitizeGraphForSave,
 } from "@/lib/workflow/canvas";
-import { defaultConfigForNodeType, serializeImageFieldState } from "@/lib/workflow/node-defaults";
+import { defaultConfigForNodeType } from "@/lib/workflow/node-defaults";
+import {
+  normalizeRequestInputsConfig,
+  serializeRequestInputsConfig,
+} from "@/lib/workflow/request-inputs-fields";
 import { createWorkflowNode } from "@/lib/workflow/node-registry";
 import type {
   CropImageConfig,
@@ -51,16 +55,13 @@ function sanitizeNodeForExport(node: WorkflowCanvasNode): WorkflowCanvasNode {
   const config = stripSecretsDeep(node.data.config) as WorkflowCanvasNode["data"]["config"];
 
   if (node.data.nodeType === "requestInputs") {
-    const requestConfig = config as RequestInputsConfig;
+    const requestConfig = normalizeRequestInputsConfig(config);
 
     return {
       ...node,
       data: {
         ...node.data,
-        config: {
-          ...requestConfig,
-          imageField: serializeImageFieldState(requestConfig.imageField),
-        },
+        config: serializeRequestInputsConfig(requestConfig),
       },
     };
   }
@@ -224,6 +225,13 @@ export function createAssignmentSampleWorkflow(): {
   const requestConfig = defaultConfigForNodeType(
     "requestInputs",
   ) as RequestInputsConfig;
+  const requestConfigWithPrompt: RequestInputsConfig = {
+    fields: requestConfig.fields.map((field) =>
+      field.id === "text_field"
+        ? { ...field, textValue: "Describe this uploaded image." }
+        : field,
+    ),
+  };
 
   const nodes: WorkflowCanvasNode[] = [
     createSampleNode(
@@ -232,8 +240,7 @@ export function createAssignmentSampleWorkflow(): {
       "Request Inputs",
       { x: 40, y: 300 },
       {
-        ...requestConfig,
-        textField: "Describe this uploaded image.",
+        ...requestConfigWithPrompt,
       },
     ),
     createSampleNode(

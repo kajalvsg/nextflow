@@ -16,7 +16,7 @@ import {
   logGeminiDebug,
   logGeminiEnvSnapshot,
 } from "@/lib/workflow/execution/gemini-debug";
-import { assertCropImageInputUrl } from "@/lib/workflow/execution/image-input";
+import { assertCropImageInputUrl, requireCropImageInputUrl } from "@/lib/workflow/execution/image-input";
 import { buildLocalNodeOutput } from "@/lib/workflow/execution/local-nodes";
 import {
   buildNodeInputRecord,
@@ -32,8 +32,23 @@ import {
 } from "@/lib/workflow/execution/run-store";
 import { db, ensureDbReady } from "@/lib/db";
 import type { RunScope, RunStatus } from "@/types/workflow-execution";
+import type { WorkflowNodeData, WorkflowNodeType } from "@/types/workflow-canvas";
 import { cropImageTask } from "./crop-image";
 import { geminiProTask } from "./gemini-pro";
+
+function findPlannedNodeId(
+  nodes: Array<{ id: string; data: WorkflowNodeData }>,
+  plannedNodeIds: Set<string>,
+  nodeType: WorkflowNodeType,
+): string | undefined {
+  return nodes.find(
+    (node) => plannedNodeIds.has(node.id) && node.data.nodeType === nodeType,
+  )?.id;
+}
+
+function logOrchestrator(message: string): void {
+  console.info(`[workflow-orchestrator] ${message}`);
+}
 
 export type WorkflowOrchestratorPayload = {
   runId: string;
@@ -154,10 +169,11 @@ export const workflowOrchestratorTask = task({
       try {
         if (node.data.nodeType === "cropImage") {
           assertCropImageInputUrl(input.input_image);
+          const inputImage = requireCropImageInputUrl(input.input_image);
 
           const result = await cropImageTask.triggerAndWait({
             input: {
-              input_image: input.input_image as string,
+              input_image: inputImage,
               xPercent: input.xPercent as number,
               yPercent: input.yPercent as number,
               widthPercent: input.widthPercent as number,
@@ -282,8 +298,15 @@ export const workflowOrchestratorTask = task({
     };
 
     try {
-      if (plannedNodeIds.has("request-inputs")) {
-        await runLocalNode("request-inputs");
+      const requestInputsNodeId = findPlannedNodeId(
+        nodes,
+        plannedNodeIds,
+        "requestInputs",
+      );
+
+      if (requestInputsNodeId) {
+        logOrchestrator(`running request inputs node ${requestInputsNodeId}`);
+        await runLocalNode(requestInputsNodeId);
       }
 
       const executablePending = nodes
@@ -315,11 +338,18 @@ export const workflowOrchestratorTask = task({
         }
       }
 
-      if (plannedNodeIds.has("response")) {
+      const responseNodeId = findPlannedNodeId(
+        nodes,
+        plannedNodeIds,
+        "response",
+      );
+
+      if (responseNodeId) {
         if (!hasFailure || hasDemoFallback) {
-          await runLocalNode("response");
+          logOrchestrator(`running response node ${responseNodeId}`);
+          await runLocalNode(responseNodeId);
         } else {
-          const execution = executionByNodeId.get("response");
+          const execution = executionByNodeId.get(responseNodeId);
 
           if (execution) {
             await markNodeExecutionSkipped(execution.id);
@@ -345,6 +375,10 @@ export const workflowOrchestratorTask = task({
             : "success";
 
       await finalizeWorkflowRun(payload.runId, finalStatus, startedAt);
+
+      logOrchestrator(
+        `completed run ${payload.runId} with status ${finalStatus}`,
+      );
 
       return {
         runId: payload.runId,

@@ -10,11 +10,14 @@ import type {
   WorkflowRunDetail,
   WorkflowRunSummary,
 } from "@/types/workflow-execution";
+import { pollServerAction } from "@/lib/utils/poll-server-action";
 import { cn } from "@/lib/utils/cn";
 
 type WorkflowHistoryPanelProps = {
   workflowId: string;
   refreshKey: number;
+  activeRunId?: string | null;
+  isRunActive?: boolean;
   onClose?: () => void;
 };
 
@@ -126,9 +129,21 @@ function matchesFilter(
   return false;
 }
 
+const HISTORY_POLL_INTERVAL_MS = 2500;
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Failed to load run history.";
+}
+
 export function WorkflowHistoryPanel({
   workflowId,
   refreshKey,
+  activeRunId = null,
+  isRunActive = false,
   onClose,
 }: WorkflowHistoryPanelProps) {
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
@@ -139,29 +154,132 @@ export function WorkflowHistoryPanel({
   const [expandedDetail, setExpandedDetail] = useState<WorkflowRunDetail | null>(
     null,
   );
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
+  const hasLoadedRef = useRef(false);
+  const expandedRunIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    expandedRunIdRef.current = expandedRunId;
+  }, [expandedRunId]);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    setInitialLoading(true);
+    setError(null);
+    hasLoadedRef.current = false;
 
-    getWorkflowRunHistory(workflowId)
+    void pollServerAction("getWorkflowRunHistory", () =>
+      getWorkflowRunHistory(workflowId),
+    )
       .then((history) => {
         if (!cancelled) {
           setRuns(history);
+          setError(null);
+          hasLoadedRef.current = true;
+        }
+      })
+      .catch((loadError) => {
+        if (!cancelled) {
+          setError(getErrorMessage(loadError));
         }
       })
       .finally(() => {
         if (!cancelled) {
-          setLoading(false);
+          setInitialLoading(false);
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [workflowId, refreshKey]);
+  }, [workflowId]);
+
+  useEffect(() => {
+    if (!isRunActive && !activeRunId) {
+      return;
+    }
+
+    let cancelled = false;
+    let refreshInFlight = false;
+
+    const refreshHistory = async () => {
+      if (refreshInFlight) {
+        return;
+      }
+
+      refreshInFlight = true;
+
+      try {
+        const history = await pollServerAction("getWorkflowRunHistory", () =>
+          getWorkflowRunHistory(workflowId),
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setRuns(history);
+        setError(null);
+
+        const expandedId = expandedRunIdRef.current;
+
+        if (expandedId) {
+          const detail = await pollServerAction("getWorkflowRunDetail", () =>
+            getWorkflowRunDetail(expandedId),
+          );
+
+          if (!cancelled && detail) {
+            setExpandedDetail(detail);
+          }
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(getErrorMessage(loadError));
+        }
+      } finally {
+        refreshInFlight = false;
+      }
+    };
+
+    void refreshHistory();
+    const interval = setInterval(() => {
+      void refreshHistory();
+    }, HISTORY_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [workflowId, activeRunId, isRunActive]);
+
+  useEffect(() => {
+    if (refreshKey === 0 || !hasLoadedRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void pollServerAction("getWorkflowRunHistory", () =>
+      getWorkflowRunHistory(workflowId),
+    )
+      .then((history) => {
+        if (!cancelled) {
+          setRuns(history);
+          setError(null);
+        }
+      })
+      .catch((loadError) => {
+        if (!cancelled) {
+          setError(getErrorMessage(loadError));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey, workflowId]);
 
   useEffect(() => {
     if (!filterOpen) {
@@ -296,9 +414,13 @@ export function WorkflowHistoryPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        {loading ? (
+        {initialLoading ? (
           <div className="workflow-history-empty-card">
             <p className="workflow-history-empty-text">Loading runs…</p>
+          </div>
+        ) : error ? (
+          <div className="workflow-history-empty-card">
+            <p className="workflow-history-empty-text text-red-500">{error}</p>
           </div>
         ) : visibleRuns.length === 0 ? (
           <div className="workflow-history-empty-card">

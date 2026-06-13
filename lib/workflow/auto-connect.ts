@@ -1,6 +1,10 @@
 import type { Connection, Edge, Node } from "reactflow";
 import { validateWorkflowConnection } from "@/lib/workflow/connection-rules";
 import { isTargetHandleConnected } from "@/lib/workflow/connection-rules";
+import {
+  findFirstRequestFieldId,
+  normalizeRequestInputsConfig,
+} from "@/lib/workflow/request-inputs-fields";
 import type { WorkflowNodeData } from "@/types/workflow-canvas";
 
 function tryConnection(
@@ -33,11 +37,15 @@ export function findAutoConnectSource(
 
   if (targetHandle === "prompt" || targetHandle === "system_prompt") {
     if (requestInputs) {
+      const requestConfig = normalizeRequestInputsConfig(requestInputs.data.config);
+      const textFieldId =
+        findFirstRequestFieldId(requestConfig, "text_field") ?? "text_field";
+
       const fromRequest = tryConnection(
         {
           source: requestInputs.id,
           target: targetNodeId,
-          sourceHandle: "text_field",
+          sourceHandle: textFieldId,
           targetHandle,
         },
         nodes,
@@ -75,11 +83,15 @@ export function findAutoConnectSource(
 
   if (targetHandle === "image_vision") {
     if (requestInputs) {
+      const requestConfig = normalizeRequestInputsConfig(requestInputs.data.config);
+      const imageFieldId =
+        findFirstRequestFieldId(requestConfig, "image_field") ?? "image_field";
+
       const fromRequest = tryConnection(
         {
           source: requestInputs.id,
           target: targetNodeId,
-          sourceHandle: "image_field",
+          sourceHandle: imageFieldId,
           targetHandle,
         },
         nodes,

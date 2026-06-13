@@ -18,7 +18,7 @@ export const NODE_PICKER_ITEMS: NodePickerItem[] = [
   },
   {
     type: "geminiPro",
-    label: "Gemini",
+    label: "Gemini 3.1 Pro",
     description: "Generate responses with Gemini vision model.",
     keywords: ["gemini", "ai", "llm", "vision", "pro"],
   },

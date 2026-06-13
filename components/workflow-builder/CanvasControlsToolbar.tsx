@@ -46,7 +46,7 @@ export function CanvasControlsToolbar({
 }: CanvasControlsToolbarProps) {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const zoom = useStore((state) => state.transform[2]);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [zoomLabel, setZoomLabel] = useState("100%");
 

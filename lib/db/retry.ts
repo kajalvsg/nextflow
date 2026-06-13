@@ -1,3 +1,5 @@
+import { isLocalDatabaseEnabled } from "@/lib/db/database-mode";
+
 const RETRYABLE_CODES = new Set([
   "ECONNRESET",
   "ECONNREFUSED",
@@ -80,7 +82,7 @@ export async function withDbRetry<T>(
 }
 
 export function getDbErrorMessage(error: unknown): string {
-  const usingLocalDb = process.env.USE_LOCAL_DB === "true";
+  const usingLocalDb = isLocalDatabaseEnabled();
 
   if (error && typeof error === "object" && "code" in error) {
     const code = String(error.code);
