@@ -14,8 +14,9 @@ import {
 } from "lucide-react";
 import { type NodeProps, useUpdateNodeInternals } from "reactflow";
 import {
-  getExecutableImageUrl,
+  getImagePreviewUrl,
   needsImageReupload,
+  normalizeStoredImageUrl,
   uploadWorkflowImage,
   validateWorkflowImageFile,
 } from "@/lib/upload/image-upload";
@@ -86,11 +87,11 @@ function RequestInputFieldRow({
   }, []);
 
   const savedImage = field.imageValue ?? defaultImageFieldState();
-  const hasSavedImage = Boolean(savedImage.fileUrl);
-  const hasExecutableImage = Boolean(getExecutableImageUrl(savedImage.fileUrl));
-  const displayPreviewUrl =
-    isUploading && localPreviewUrl ? localPreviewUrl : savedImage.fileUrl;
-  const showPreview = Boolean(displayPreviewUrl);
+  const previewUrl =
+    isUploading && localPreviewUrl
+      ? localPreviewUrl
+      : getImagePreviewUrl(savedImage);
+  const showPreview = Boolean(previewUrl);
 
   const resetLocalUploadState = () => {
     revokePreviewUrl(localPreviewRef.current);
@@ -141,7 +142,7 @@ function RequestInputFieldRow({
 
       onImageChange(field.id, {
         fileName: result.fileName,
-        fileUrl: result.fileUrl,
+        fileUrl: normalizeStoredImageUrl(result.fileUrl) ?? result.fileUrl,
         mimeType: result.mimeType ?? file.type ?? null,
         size: result.size ?? file.size,
       });
@@ -170,13 +171,6 @@ function RequestInputFieldRow({
     try {
       if (field.type === "text_field") {
         await navigator.clipboard.writeText(field.textValue ?? "");
-        return;
-      }
-
-      const url = savedImage.fileUrl;
-
-      if (url) {
-        await navigator.clipboard.writeText(url);
       }
     } catch {
       // Clipboard may be unavailable in some contexts.
@@ -296,7 +290,7 @@ function RequestInputFieldRow({
                 </div>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={displayPreviewUrl ?? undefined}
+                  src={previewUrl ?? undefined}
                   alt={savedImage.fileName ?? "Uploaded image"}
                   className="max-h-24 w-full rounded-md object-cover"
                 />
@@ -334,26 +328,6 @@ function RequestInputFieldRow({
               </button>
             )}
 
-            {!showPreview ? (
-              <input
-                type="url"
-                placeholder="Or paste image URL..."
-                value=""
-                disabled={isUploading}
-                onChange={(event) => {
-                  const url = event.target.value.trim();
-                  onImageChange(field.id, {
-                    fileName: url ? "Image URL" : null,
-                    fileUrl: url || null,
-                    mimeType: null,
-                    size: null,
-                  });
-                }}
-                onPointerDown={stopNodePointer}
-                className="workflow-node-prompt-field mt-2 w-full px-2 py-1.5 text-[11px]"
-              />
-            ) : null}
-
             {uploadErrorMessage ? (
               <p className="mt-1 text-[10px] text-red-500">
                 {uploadErrorMessage}
@@ -363,14 +337,6 @@ function RequestInputFieldRow({
             {needsImageReupload(savedImage.fileUrl) ? (
               <p className="mt-1 text-[10px] text-amber-600">
                 Re-upload this image before running the workflow.
-              </p>
-            ) : null}
-
-            {hasSavedImage &&
-            !hasExecutableImage &&
-            !needsImageReupload(savedImage.fileUrl) ? (
-              <p className="mt-1 text-[10px] text-amber-600">
-                Image preview unavailable for execution. Re-upload the image.
               </p>
             ) : null}
           </>

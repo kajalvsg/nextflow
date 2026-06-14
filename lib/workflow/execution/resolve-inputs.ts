@@ -1,9 +1,7 @@
 import type { Edge, Node } from "reactflow";
 import { normalizeEdgeForResolution } from "@/lib/workflow/execution/edge-handles";
-import {
-  normalizeImageInputUrl,
-  resolveImageInputFromEdge,
-} from "@/lib/workflow/execution/image-input";
+import { resolveImageInputFromEdge } from "@/lib/workflow/execution/image-input";
+import { resolveImageFieldForExecution } from "@/lib/upload/image-upload";
 import { normalizeRequestInputsConfig } from "@/lib/workflow/request-inputs-fields";
 import type {
   CropImageConfig,
@@ -26,10 +24,8 @@ export function resolveRequestInputsOutput(
     }
 
     const imageValue = field.imageValue;
-    const rawUrl = imageValue?.fileUrl?.trim() ?? "";
-    output[field.id] = rawUrl
-      ? normalizeImageInputUrl(rawUrl) ?? rawUrl
-      : null;
+    const resolved = resolveImageFieldForExecution(imageValue);
+    output[field.id] = resolved;
     output[`${field.id}_meta`] = imageValue ?? null;
   }
 

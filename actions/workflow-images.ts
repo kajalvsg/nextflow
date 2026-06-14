@@ -7,7 +7,10 @@ import { auth } from "@clerk/nextjs/server";
 import { resolveProjectRoot } from "@/lib/db/project-root";
 import { db, ensureDbReady } from "@/lib/db";
 import type { ImageUploadResult } from "@/lib/upload/image-upload";
-import { ALLOWED_IMAGE_MIME_TYPES } from "@/lib/upload/image-upload";
+import {
+  ALLOWED_IMAGE_MIME_TYPES,
+  toWorkflowAssetPath,
+} from "@/lib/upload/image-upload";
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const UPLOAD_DIR = path.join(resolveProjectRoot(), "public", "workflow-assets");
@@ -23,11 +26,7 @@ async function requireUserId(): Promise<string> {
 }
 
 function getPublicAssetUrl(fileName: string): string {
-  const baseUrl =
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ??
-    "http://localhost:3000";
-
-  return `${baseUrl}/workflow-assets/${fileName}`;
+  return toWorkflowAssetPath(fileName);
 }
 
 function extensionForMimeType(mimeType: string): string {

@@ -1,5 +1,11 @@
+import { readFile } from "fs/promises";
+import path from "path";
 import sharp from "sharp";
-import { normalizeImageInputUrl } from "@/lib/workflow/execution/image-input";
+import { resolveProjectRoot } from "@/lib/db/project-root";
+import {
+  normalizeImageInputUrl,
+  requireCropImageInputUrl,
+} from "@/lib/workflow/execution/image-input";
 
 export type CropImageInput = {
   input_image?: string | null;
@@ -17,6 +23,28 @@ export type CropImageOutput = {
 
 const MIN_CROP_DURATION_MS = 30_000;
 
+function extractWorkflowAssetFileName(reference: string): string | null {
+  const match = reference.match(/\/workflow-assets\/([^?#]+)/);
+
+  return match?.[1] ?? null;
+}
+
+async function readLocalWorkflowAsset(reference: string): Promise<Buffer | null> {
+  const assetFileName = extractWorkflowAssetFileName(reference);
+
+  if (!assetFileName) {
+    return null;
+  }
+
+  try {
+    return await readFile(
+      path.join(resolveProjectRoot(), "public", "workflow-assets", assetFileName),
+    );
+  } catch {
+    return null;
+  }
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -32,6 +60,12 @@ async function loadImageBuffer(inputImage: string): Promise<Buffer> {
     }
 
     return Buffer.from(base64, "base64");
+  }
+
+  const localAsset = await readLocalWorkflowAsset(trimmed);
+
+  if (localAsset) {
+    return localAsset;
   }
 
   const fetchUrl = normalizeImageInputUrl(trimmed) ?? trimmed;
@@ -73,17 +107,7 @@ export async function executeCropImage(
   input: CropImageInput,
 ): Promise<CropImageOutput> {
   const startedAt = Date.now();
-
-  if (!input.input_image?.trim()) {
-    throw new Error("Crop Image requires a connected input image or image URL.");
-  }
-
-  const normalizedInput = normalizeImageInputUrl(input.input_image);
-
-  if (!normalizedInput) {
-    throw new Error("Crop Image requires a valid uploaded image or image URL.");
-  }
-
+  const normalizedInput = requireCropImageInputUrl(input.input_image);
   const buffer = await loadImageBuffer(normalizedInput);
   const image = sharp(buffer);
   const metadata = await image.metadata();

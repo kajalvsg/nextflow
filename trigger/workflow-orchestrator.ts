@@ -621,7 +621,7 @@ export const workflowOrchestratorTask = task({
           if (node?.data.nodeType === "cropImage") {
             skippedExecutables.push({
               nodeId,
-              message: "Crop Image requires a valid connected input image.",
+              message: "Crop Image requires a connected uploaded image.",
             });
           } else if (node?.data.nodeType === "geminiPro") {
             skippedExecutables.push({

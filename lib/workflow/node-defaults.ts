@@ -1,3 +1,4 @@
+import { normalizeStoredImageUrl } from "@/lib/upload/image-upload";
 import { defaultRequestInputsConfig } from "@/lib/workflow/request-inputs-fields";
 import type {
   CropImageConfig,
@@ -23,7 +24,9 @@ export function serializeImageFieldState(
 ): ImageFieldState {
   const rawUrl = typeof value.fileUrl === "string" ? value.fileUrl.trim() : "";
   const fileUrl =
-    rawUrl.length > 0 && !rawUrl.startsWith("blob:") ? rawUrl : null;
+    rawUrl.length > 0 && !rawUrl.startsWith("blob:")
+      ? normalizeStoredImageUrl(rawUrl)
+      : null;
 
   if (!fileUrl) {
     return defaultImageFieldState();

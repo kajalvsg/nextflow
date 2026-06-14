@@ -1,12 +1,16 @@
 import type { Edge, Node } from "reactflow";
-import { getExecutableImageUrl } from "@/lib/upload/image-upload";
+import {
+  getExecutableImageUrl,
+  normalizeStoredImageUrl,
+  resolveImageFieldForExecution,
+} from "@/lib/upload/image-upload";
 import {
   getRequestInputField,
   isRequestInputsImageHandle,
   normalizeRequestInputsConfig,
 } from "@/lib/workflow/request-inputs-fields";
 import type { NodeOutputMap } from "@/lib/workflow/execution/resolve-inputs";
-import type { WorkflowNodeData } from "@/types/workflow-canvas";
+import type { ImageFieldState, WorkflowNodeData } from "@/types/workflow-canvas";
 
 export const IMAGE_SOURCE_HANDLES = new Set(["image_field", "output_image"]);
 
@@ -17,7 +21,7 @@ export const CROP_OUTPUT_IMAGE_KEYS = [
 ] as const;
 
 export const CROP_IMAGE_INPUT_ERROR =
-  "Crop Image requires a valid uploaded image or image URL.";
+  "Crop Image requires a connected uploaded image.";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -99,37 +103,21 @@ export function normalizeImageInputUrl(value: unknown): string | null {
     return null;
   }
 
-  const trimmed = value.trim();
+  const stored = normalizeStoredImageUrl(value);
 
-  if (!trimmed) {
+  if (!stored) {
     return null;
   }
 
-  const executable = getExecutableImageUrl(trimmed);
+  return getExecutableImageUrl(stored) ?? stored;
+}
 
-  if (executable) {
-    return executable;
-  }
-
-  if (trimmed.startsWith("data:image/")) {
-    return trimmed;
-  }
-
-  if (trimmed.startsWith("/workflow-assets/")) {
-    return getExecutableImageUrl(trimmed);
-  }
-
-  try {
-    const url = new URL(trimmed);
-
-    if (url.protocol === "http:" || url.protocol === "https:") {
-      return trimmed;
-    }
-  } catch {
+function resolveImageFieldMeta(value: unknown): string | null {
+  if (!isRecord(value)) {
     return null;
   }
 
-  return null;
+  return resolveImageFieldForExecution(value as ImageFieldState);
 }
 
 export function readCropOutputImage(
@@ -165,8 +153,8 @@ function readImageFromOutputRecord(
 
   const meta = sourceOutput[`${normalizedHandle}_meta`];
 
-  if (isRecord(meta)) {
-    const fromMeta = normalizeImageInputUrl(meta.fileUrl);
+  if (meta) {
+    const fromMeta = resolveImageFieldMeta(meta);
 
     if (fromMeta) {
       return fromMeta;
@@ -194,7 +182,7 @@ function readImageFromNodeConfig(
     return null;
   }
 
-  return normalizeImageInputUrl(field.imageValue?.fileUrl ?? null);
+  return resolveImageFieldForExecution(field.imageValue);
 }
 
 export function resolveImageValue(
@@ -215,6 +203,18 @@ export function resolveImageValue(
 
   const sourceNodeType = getSourceNodeType(nodes, sourceNodeId);
   const sourceOutput = outputs.get(sourceNodeId);
+
+  if (sourceNodeType === "requestInputs") {
+    const fromConfig = readImageFromNodeConfig(
+      sourceNodeId,
+      normalizedHandle,
+      nodes,
+    );
+
+    if (fromConfig) {
+      return fromConfig;
+    }
+  }
 
   if (sourceNodeType === "cropImage") {
     if (!isOutputImageHandle(normalizedHandle)) {
