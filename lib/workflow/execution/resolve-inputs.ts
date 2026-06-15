@@ -6,8 +6,10 @@ import {
   resolveImageSourceWithPriority,
   toImageExecutionOutput,
 } from "@/lib/upload/image-upload";
-import { serializeImageFieldState } from "@/lib/workflow/node-defaults";
-import { normalizeRequestInputsConfig } from "@/lib/workflow/request-inputs-fields";
+import {
+  getImageFieldExecutionState,
+  normalizeRequestInputsConfig,
+} from "@/lib/workflow/request-inputs-fields";
 import type {
   CropImageConfig,
   GeminiProConfig,
@@ -35,8 +37,7 @@ export function resolveRequestInputsOutput(
       continue;
     }
 
-    const imageValue = field.imageValue;
-    const persisted = serializeImageFieldState(imageValue ?? {});
+    const persisted = getImageFieldExecutionState(field);
     const imageOutput = toImageExecutionOutput(persisted);
     const resolved =
       imageOutput.value ??

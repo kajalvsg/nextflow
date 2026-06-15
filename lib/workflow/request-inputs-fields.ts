@@ -118,12 +118,82 @@ export function createRequestInputField(
   return createRequestInputFieldWithId(type, id, label ?? id);
 }
 
+export function getImageFieldExecutionState(
+  field: RequestInputField,
+): ImageFieldState {
+  if (field.type !== "image_field") {
+    return defaultImageFieldState();
+  }
+
+  return serializeImageFieldState({
+    ...(field.imageValue ?? {}),
+    value: field.value ?? field.imageValue?.value,
+    dataUrl: field.dataUrl ?? field.imageValue?.dataUrl,
+    fileName: field.fileName ?? field.imageValue?.fileName,
+    mimeType: field.mimeType ?? field.imageValue?.mimeType,
+    meta: field.meta ?? field.imageValue?.meta,
+  });
+}
+
+export function getImageFieldFromConfigFields(
+  config: unknown,
+  fieldId: string,
+): ImageFieldState | null {
+  if (!isRecord(config) || !Array.isArray(config.fields)) {
+    return null;
+  }
+
+  for (const item of config.fields) {
+    if (!isRecord(item) || item.id !== fieldId || item.type !== "image_field") {
+      continue;
+    }
+
+    const state = serializeImageFieldState(mergeImageFieldRecord(item));
+
+    if (state.dataUrl || state.value || state.fileUrl) {
+      return state;
+    }
+  }
+
+  return null;
+}
+
+function mergeImageFieldRecord(value: Record<string, unknown>): Record<string, unknown> {
+  const nested = value.imageValue ?? value.imageField;
+  const base: Record<string, unknown> = isRecord(nested) ? { ...nested } : {};
+
+  if (typeof value.value === "string") {
+    base.value = value.value;
+  }
+
+  if (typeof value.dataUrl === "string") {
+    base.dataUrl = value.dataUrl;
+  }
+
+  if (typeof value.fileName === "string") {
+    base.fileName = value.fileName;
+  }
+
+  if (typeof value.mimeType === "string") {
+    base.mimeType = value.mimeType;
+  }
+
+  if (isRecord(value.meta)) {
+    base.meta = {
+      ...(isRecord(base.meta) ? (base.meta as Record<string, unknown>) : {}),
+      ...value.meta,
+    };
+  }
+
+  return base;
+}
+
 function parseImageFieldState(value: unknown): ImageFieldState {
   if (!isRecord(value)) {
     return defaultImageFieldState();
   }
 
-  return serializeImageFieldState(value);
+  return serializeImageFieldState(mergeImageFieldRecord(value));
 }
 
 function parseRequestInputField(value: unknown): RequestInputField | null {
@@ -155,7 +225,7 @@ function parseRequestInputField(value: unknown): RequestInputField | null {
     id,
     label: label || id,
     type,
-    imageValue: parseImageFieldState(value.imageValue ?? value.imageField),
+    imageValue: parseImageFieldState(mergeImageFieldRecord(value)),
   };
 }
 
@@ -250,11 +320,23 @@ export function serializeRequestInputsConfig(
         };
       }
 
+      const imageValue = getImageFieldExecutionState(field);
+
       return {
         id: field.id,
         label: field.label,
         type: field.type,
-        imageValue: serializeImageFieldState(field.imageValue ?? {}),
+        value: imageValue.value,
+        dataUrl: imageValue.dataUrl,
+        fileName: imageValue.fileName,
+        mimeType: imageValue.mimeType,
+        meta: {
+          dataUrl: imageValue.dataUrl ?? null,
+          fileUrl: imageValue.fileUrl ?? null,
+          fileName: imageValue.fileName ?? null,
+          mimeType: imageValue.mimeType ?? null,
+        },
+        imageValue,
       };
     }),
   };

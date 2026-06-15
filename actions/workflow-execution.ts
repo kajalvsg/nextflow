@@ -5,7 +5,6 @@ import { tasks } from "@trigger.dev/sdk/v3";
 import { z } from "zod";
 import { db, ensureDbReady, withFreshLocalRead } from "@/lib/db";
 import { parseStoredGraph } from "@/lib/workflow/canvas";
-import { prepareGraphPayload } from "@/lib/workflow/graph-payload";
 import { planExecutionNodeIds } from "@/lib/workflow/execution/dag";
 import { createWorkflowRunRecord, nodeDisplayName } from "@/lib/workflow/execution/run-store";
 import type { workflowOrchestratorTask } from "@/trigger/workflow-orchestrator";
@@ -25,6 +24,8 @@ const startRunSchema = z.object({
   workflowId: z.string().min(1),
   scope: z.enum(["full", "single", "partial"]),
   selectedNodeIds: z.array(z.string()).optional(),
+  nodes: z.array(z.unknown()).min(1, "Execution graph nodes are required."),
+  edges: z.array(z.unknown()),
 });
 
 async function requireUserId(): Promise<string> {
@@ -181,12 +182,18 @@ export async function startWorkflowRun(
       };
     }
 
-    const { workflowId, scope, selectedNodeIds = [] } = parsed.data;
+    const {
+      workflowId,
+      scope,
+      selectedNodeIds = [],
+      nodes: clientNodes,
+      edges: clientEdges,
+    } = parsed.data;
     const normalizedWorkflowId = workflowId.trim();
 
     const workflow = await db.workflow.findFirst({
       where: { id: normalizedWorkflowId, userId },
-      select: { id: true, nodes: true, edges: true },
+      select: { id: true },
     });
 
     if (!workflow) {
@@ -207,7 +214,7 @@ export async function startWorkflowRun(
       };
     }
 
-    const graph = parseStoredGraph(workflow.nodes, workflow.edges);
+    const graph = parseStoredGraph(clientNodes, clientEdges);
     const plannedNodeIds = planExecutionNodeIds(
       scope as RunScope,
       graph.nodes,
@@ -229,7 +236,12 @@ export async function startWorkflowRun(
       plannedNodes,
     });
 
-    const sanitized = prepareGraphPayload(graph.nodes, graph.edges);
+    const triggerPayload = JSON.parse(
+      JSON.stringify({ nodes: clientNodes, edges: clientEdges }),
+    ) as {
+      nodes: Record<string, unknown>[];
+      edges: Record<string, unknown>[];
+    };
 
     await tasks.trigger<typeof workflowOrchestratorTask>(
       "workflow-orchestrator",
@@ -238,8 +250,8 @@ export async function startWorkflowRun(
         workflowId: normalizedWorkflowId,
         userId,
         scope: scope as RunScope,
-        nodes: sanitized.nodes as unknown as Record<string, unknown>[],
-        edges: sanitized.edges as unknown as Record<string, unknown>[],
+        nodes: triggerPayload.nodes,
+        edges: triggerPayload.edges,
         plannedNodeIds,
       },
     );

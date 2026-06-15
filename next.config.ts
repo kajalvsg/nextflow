@@ -19,6 +19,11 @@ function parseDevOrigins(): string[] {
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: parseDevOrigins(),
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "10mb",
+    },
+  },
   serverExternalPackages: [
     "@electric-sql/pglite",
     "pglite-prisma-adapter",

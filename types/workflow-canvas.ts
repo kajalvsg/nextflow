@@ -11,6 +11,8 @@ export type AddableWorkflowNodeType = "cropImage" | "geminiPro";
 export type ImageFieldMeta = {
   fileUrl: string | null;
   dataUrl: string | null;
+  fileName?: string | null;
+  mimeType?: string | null;
 };
 
 export type ImageFieldState = {
@@ -42,6 +44,12 @@ export type RequestInputField = {
   label: string;
   type: RequestInputFieldType;
   textValue?: string;
+  /** Flat persisted keys for image execution (duplicated from imageValue for DB round-trips). */
+  value?: string | null;
+  dataUrl?: string | null;
+  fileName?: string | null;
+  mimeType?: string | null;
+  meta?: ImageFieldMeta;
   imageValue?: ImageFieldState;
 };
 

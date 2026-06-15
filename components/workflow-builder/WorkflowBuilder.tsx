@@ -1811,10 +1811,17 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       return;
     }
 
+    const executionGraph = prepareGraphPayload(
+      nodesRef.current,
+      edgesRef.current,
+    );
+
     const result = await startWorkflowRun({
       workflowId,
       scope,
       selectedNodeIds,
+      nodes: executionGraph.nodes as unknown as Record<string, unknown>[],
+      edges: executionGraph.edges as unknown as Record<string, unknown>[],
     });
 
     if (!result.success) {

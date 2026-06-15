@@ -210,9 +210,12 @@ export function classifyCropImageSource(
 
 export function logCropImageSource(
   kind: CropImageSourceKind,
-  path: string,
+  path?: string,
 ): void {
-  console.info(`[crop-image] source type: ${kind}, path: ${path}`);
+  const typeLabel = kind === "http" ? "http" : kind;
+  console.info(
+    `crop image resolved source type: ${typeLabel}${path ? `, path: ${path}` : ""}`,
+  );
 }
 
 /** Canonical stored reference for workflow asset uploads. */
@@ -546,13 +549,16 @@ export function toImageExecutionOutput(
       ? state.dataUrl
       : null) ??
     (state.value && isDataImageReference(state.value) ? state.value : null) ??
+    (state.meta?.dataUrl && isDataImageReference(state.meta.dataUrl)
+      ? state.meta.dataUrl
+      : null) ??
     null;
 
-  const fileUrl = state.fileUrl;
+  const fileUrl = state.fileUrl ?? state.meta?.fileUrl ?? null;
   const value =
+    dataUrl ??
     state.value ??
     state.executionUrl ??
-    dataUrl ??
     getExecutableImageUrl(fileUrl) ??
     fileUrl;
 
@@ -563,6 +569,8 @@ export function toImageExecutionOutput(
     meta: {
       fileUrl,
       dataUrl,
+      fileName: state.fileName ?? state.meta?.fileName ?? null,
+      mimeType: state.mimeType ?? state.meta?.mimeType ?? null,
     },
   };
 }
@@ -619,47 +627,47 @@ export function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-function isPublicHttpUrl(fileUrl: string): boolean {
-  return (
-    fileUrl.startsWith("http://") ||
-    fileUrl.startsWith("https://") ||
-    fileUrl.startsWith("//")
-  );
+
+/**
+ * Build persisted image field state. Always stores a FileReader data URL for execution.
+ */
+export async function buildImageFieldFromFile(
+  file: File,
+  dataUrl: string,
+  uploadResult?: ImageUploadResult | null,
+): Promise<ImageFieldState> {
+  if (!dataUrl.startsWith("data:image/")) {
+    throw new Error("Failed to read image as data URL.");
+  }
+
+  const fileUrl = uploadResult
+    ? normalizeStoredImageUrl(uploadResult.fileUrl) ?? uploadResult.fileUrl
+    : null;
+
+  return {
+    fileName: file.name,
+    fileUrl: fileUrl && !fileUrl.startsWith("blob:") ? fileUrl : null,
+    dataUrl,
+    value: dataUrl,
+    executionUrl: dataUrl,
+    meta: {
+      dataUrl,
+      fileUrl: fileUrl && !fileUrl.startsWith("blob:") ? fileUrl : null,
+      fileName: file.name,
+      mimeType: file.type || null,
+    },
+    mimeType: file.type || null,
+    size: file.size,
+  };
 }
 
 /**
- * Build persisted image field state with server-usable references.
- * Local/serverless uploads always persist a data URL for Trigger.dev execution.
+ * @deprecated Use buildImageFieldFromFile after readFileAsDataURL.
  */
 export async function buildImageFieldFromUpload(
   file: File,
   result: ImageUploadResult,
 ): Promise<ImageFieldState> {
-  const fileUrl = normalizeStoredImageUrl(result.fileUrl) ?? result.fileUrl;
-  let dataUrl: string | null = null;
-
-  if (!isPublicHttpUrl(fileUrl)) {
-    try {
-      dataUrl = await readFileAsDataUrl(file);
-    } catch {
-      dataUrl = null;
-    }
-  }
-
-  const value =
-    dataUrl ?? getExecutableImageUrl(fileUrl) ?? fileUrl;
-
-  return {
-    fileName: result.fileName,
-    fileUrl,
-    dataUrl,
-    value,
-    executionUrl: value,
-    meta: {
-      fileUrl,
-      dataUrl,
-    },
-    mimeType: result.mimeType ?? file.type ?? null,
-    size: result.size ?? file.size,
-  };
+  const dataUrl = await readFileAsDataUrl(file);
+  return buildImageFieldFromFile(file, dataUrl, result);
 }

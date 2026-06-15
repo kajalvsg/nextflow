@@ -3,12 +3,15 @@ import {
   CROP_IMAGE_BLOB_ERROR,
   extractStoredImageReference,
   getExecutableImageUrl,
+  getImagePreviewUrl,
   normalizeStoredImageUrl,
   recordContainsBlobReference,
   resolveImageFieldForExecution,
   resolveImageSourceWithPriority,
 } from "@/lib/upload/image-upload";
 import {
+  getImageFieldExecutionState,
+  getImageFieldFromConfigFields,
   getRequestInputField,
   isRequestInputsImageHandle,
   normalizeRequestInputsConfig,
@@ -26,6 +29,9 @@ export const CROP_OUTPUT_IMAGE_KEYS = [
 
 export const CROP_IMAGE_INPUT_ERROR =
   "Crop Image requires an uploaded image URL.";
+
+export const CROP_IMAGE_PREVIEW_WITHOUT_SOURCE_ERROR =
+  "Image preview exists but execution source was not saved.";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -143,7 +149,21 @@ function resolveCropImageSource(
       `${pathPrefix}.requestInputField.meta`,
     );
 
-  return fromField?.url ?? null;
+  if (fromField) {
+    return fromField.url;
+  }
+
+  const previewCandidate =
+    requestInputField ??
+    (isRecord(connectedInput) ? (connectedInput as ImageFieldState) : null) ??
+    (isRecord(connectedMeta) ? (connectedMeta as ImageFieldState) : null);
+
+  if (previewCandidate && getImagePreviewUrl(previewCandidate)) {
+    console.info("Preview exists but execution dataUrl missing");
+    throw new Error(CROP_IMAGE_PREVIEW_WITHOUT_SOURCE_ERROR);
+  }
+
+  return null;
 }
 
 /** Normalize any supported image reference to a fetchable URL or data URL. */
@@ -218,8 +238,14 @@ function readImageFromNodeConfig(
 
   const config = normalizeRequestInputsConfig(node.data.config);
   const field = getRequestInputField(config, sourceHandle);
-  const requestInputField =
-    field?.type === "image_field" ? field.imageValue : undefined;
+  const rawFieldState = getImageFieldFromConfigFields(
+    node.data.config,
+    sourceHandle,
+  );
+  const requestInputField: ImageFieldState | undefined = field?.type ===
+    "image_field"
+    ? (rawFieldState ?? getImageFieldExecutionState(field))
+    : rawFieldState ?? undefined;
 
   if (sourceOutput) {
     const fromOutput = readImageFromOutputRecord(

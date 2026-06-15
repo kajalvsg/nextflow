@@ -14,9 +14,10 @@ import {
 } from "lucide-react";
 import { type NodeProps, useUpdateNodeInternals } from "reactflow";
 import {
-  buildImageFieldFromUpload,
+  buildImageFieldFromFile,
   getImagePreviewUrl,
   needsImageReupload,
+  readFileAsDataUrl,
   uploadWorkflowImage,
   validateWorkflowImageFile,
 } from "@/lib/upload/image-upload";
@@ -136,11 +137,32 @@ function RequestInputFieldRow({
     setUploadProgress(0);
 
     try {
-      const result = await uploadWorkflowImage(file, workflowId, {
-        onProgress: setUploadProgress,
-      });
+      const dataUrl = await readFileAsDataUrl(file);
 
-      const imageValue = await buildImageFieldFromUpload(file, result);
+      let uploadResult = null;
+
+      try {
+        uploadResult = await uploadWorkflowImage(file, workflowId, {
+          onProgress: setUploadProgress,
+        });
+      } catch {
+        // Optional remote upload; dataUrl is the execution source.
+      }
+
+      const imageValue = await buildImageFieldFromFile(
+        file,
+        dataUrl,
+        uploadResult,
+      );
+
+      console.info("image saved:", {
+        hasDataUrl: Boolean(imageValue.dataUrl?.startsWith("data:image/")),
+        hasBlobUrl: Boolean(
+          imageValue.dataUrl?.startsWith("blob:") ||
+            imageValue.fileUrl?.startsWith("blob:") ||
+            imageValue.value?.startsWith("blob:"),
+        ),
+      });
 
       onImageChange(field.id, imageValue);
 
@@ -475,7 +497,20 @@ export function RequestInputsNode({
         config: serializeRequestInputsConfig({
           fields: currentConfig.fields.map((field) =>
             field.id === fieldId && field.type === "image_field"
-              ? { ...field, imageValue }
+              ? {
+                  ...field,
+                  imageValue,
+                  value: imageValue.value ?? imageValue.dataUrl ?? null,
+                  dataUrl: imageValue.dataUrl ?? null,
+                  fileName: imageValue.fileName ?? null,
+                  mimeType: imageValue.mimeType ?? null,
+                  meta: imageValue.meta ?? {
+                    dataUrl: imageValue.dataUrl ?? null,
+                    fileUrl: imageValue.fileUrl ?? null,
+                    fileName: imageValue.fileName ?? null,
+                    mimeType: imageValue.mimeType ?? null,
+                  },
+                }
               : field,
           ),
         }),

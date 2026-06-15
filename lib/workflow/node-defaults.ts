@@ -85,13 +85,6 @@ export function serializeImageFieldState(
         ? normalizeStoredImageUrl(value.executionUrl)
         : null;
 
-  const valueRef =
-    explicitValue ??
-    resolvedDataUrl ??
-    getExecutableImageUrl(fileUrl) ??
-    fileUrl ??
-    resolvedDataUrl;
-
   const metaRecord = value.meta;
   const meta = {
     fileUrl:
@@ -106,7 +99,27 @@ export function serializeImageFieldState(
       typeof metaRecord.dataUrl === "string"
         ? normalizeStoredImageUrl(metaRecord.dataUrl)
         : null) ?? resolvedDataUrl,
+    fileName:
+      (typeof metaRecord === "object" &&
+      metaRecord !== null &&
+      typeof metaRecord.fileName === "string"
+        ? metaRecord.fileName
+        : null) ??
+      (typeof value.fileName === "string" ? value.fileName : null),
+    mimeType:
+      (typeof metaRecord === "object" &&
+      metaRecord !== null &&
+      typeof metaRecord.mimeType === "string"
+        ? metaRecord.mimeType
+        : null) ??
+      (typeof value.mimeType === "string" ? value.mimeType : null),
   };
+
+  const valueRef =
+    resolvedDataUrl ??
+    explicitValue ??
+    getExecutableImageUrl(fileUrl) ??
+    fileUrl;
 
   return {
     fileName: typeof value.fileName === "string" ? value.fileName : null,
