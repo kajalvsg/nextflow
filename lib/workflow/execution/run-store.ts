@@ -1,3 +1,4 @@
+import type { NodeExecution } from "@prisma/client";
 import { db, ensureDbReady } from "@/lib/db";
 import { defaultLabelForNodeType } from "@/lib/workflow/node-defaults";
 import type { RunScope, RunStatus } from "@/types/workflow-execution";
@@ -7,6 +8,10 @@ function logRunStore(message: string): void {
   console.info(`[run-store] ${message}`);
 }
 
+/**
+ * Workflow run persistence must use sequential Prisma writes only.
+ * Nested creates and $transaction are unsupported on Neon HTTP.
+ */
 export async function createWorkflowRunRecord(input: {
   workflowId: string;
   userId: string;
@@ -21,24 +26,40 @@ export async function createWorkflowRunRecord(input: {
       userId: input.userId,
       status: "running",
       scope: input.scope,
-      executions: {
-        create: input.plannedNodes.map((node) => ({
+    },
+  });
+
+  const executions: NodeExecution[] = [];
+
+  try {
+    for (const node of input.plannedNodes) {
+      const execution = await db.nodeExecution.create({
+        data: {
+          runId: run.id,
           nodeId: node.id,
           nodeType: node.nodeType,
           status: "pending",
-        })),
+        },
+      });
+      executions.push(execution);
+    }
+  } catch (error) {
+    await db.workflowRun.update({
+      where: { id: run.id },
+      data: {
+        status: "failed",
+        endedAt: new Date(),
+        durationMs: 0,
       },
-    },
-    include: {
-      executions: true,
-    },
-  });
+    });
+    throw error;
+  }
 
   logRunStore(
     `created workflow run ${run.id} (${input.scope}, ${input.plannedNodes.length} nodes) -> running`,
   );
 
-  return run;
+  return { ...run, executions };
 }
 
 export async function markNodeExecutionRunning(executionId: string) {

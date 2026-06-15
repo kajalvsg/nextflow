@@ -195,7 +195,8 @@ export async function resolveRemoteDatabaseConnection(
 
   resolveConnectionPromise = (async () => {
     const candidates = buildConnectionUrlCandidates();
-    const priorityOrder: RemoteAdapterKind[] = ["pg", "neon-http", "neon-ws"];
+    // Prefer WebSocket over HTTP — Neon HTTP cannot run Prisma transactions.
+    const priorityOrder: RemoteAdapterKind[] = ["pg", "neon-ws", "neon-http"];
 
     const probeResults = await Promise.all(
       candidates.flatMap((connectionString) => {

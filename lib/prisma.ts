@@ -3,7 +3,7 @@ import "server-only";
 import type { PGlite } from "@electric-sql/pglite";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { PrismaPGlite } from "pglite-prisma-adapter";
-import { createRemotePrismaAdapter } from "@/lib/db/neon-client";
+import { createRemotePrismaAdapter, getDefaultRemoteConnection, getResolvedRemoteConnection } from "@/lib/db/neon-client";
 import {
   getDatabaseMode,
   hasPostgresDatabaseUrl,
@@ -17,7 +17,9 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function createRemotePrismaClient(): PrismaClient {
-  const adapter = createRemotePrismaAdapter();
+  const connection =
+    getResolvedRemoteConnection() ?? getDefaultRemoteConnection();
+  const adapter = createRemotePrismaAdapter(connection);
 
   return new PrismaClient({
     adapter,
