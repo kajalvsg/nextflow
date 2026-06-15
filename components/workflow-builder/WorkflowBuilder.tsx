@@ -22,6 +22,7 @@ import "reactflow/dist/style.css";
 import {
   getActiveRunState,
   getLatestWorkflowInlineExecutions,
+  getWorkflowRunInlineExecutions,
   startWorkflowRun,
 } from "@/actions/workflow-execution";
 import { saveWorkflowGraph } from "@/actions/workflow-builder";
@@ -34,6 +35,7 @@ import { PROTECTED_NODE_IDS, sanitizeGraphForSave } from "@/lib/workflow/canvas"
 import { getEdgeStrokeColor } from "@/lib/workflow/edge-colors";
 import { prepareGraphPayload, serializeGraphPayload } from "@/lib/workflow/graph-payload";
 import { pollServerAction } from "@/lib/utils/poll-server-action";
+import { normalizeCropExecutionOutput } from "@/lib/workflow/execution/crop-output-normalize";
 import {
   buildWorkflowExportDocument,
   createAssignmentSampleWorkflow,
@@ -159,6 +161,52 @@ function createUpdatingInlineExecutions(
       },
     ]),
   );
+}
+
+function mergeInlineExecutionsFromRun(
+  previous: Record<string, NodeInlineExecutionState>,
+  executions: Record<string, NodeInlineExecutionState>,
+): Record<string, NodeInlineExecutionState> {
+  const next = { ...previous, ...executions };
+
+  for (const [nodeId, inline] of Object.entries(next)) {
+    if (inline.status === "updating") {
+      delete next[nodeId];
+    }
+  }
+
+  return next;
+}
+
+function applyCropOutputsToNodeData(
+  nodes: Node<WorkflowNodeData>[],
+  executions: Record<string, NodeInlineExecutionState>,
+): Node<WorkflowNodeData>[] {
+  return nodes.map((node) => {
+    if (node.data.nodeType !== "cropImage") {
+      return node;
+    }
+
+    const inline = executions[node.id];
+
+    if (!inline || inline.status !== "success") {
+      return node;
+    }
+
+    const normalized = normalizeCropExecutionOutput(inline.output);
+
+    if (!normalized) {
+      return node;
+    }
+
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        outputs: normalized,
+      },
+    };
+  });
 }
 
 function isPersistableNodeChange(change: NodeChange): boolean {
@@ -1963,29 +2011,27 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
         setIsWorkflowRunning(false);
         setHistoryRefreshKey((current) => current + 1);
 
-        void pollServerAction("getLatestWorkflowInlineExecutions", () =>
-          getLatestWorkflowInlineExecutions(workflowId),
+        void pollServerAction("getWorkflowRunInlineExecutions", () =>
+          getWorkflowRunInlineExecutions(activeRunId),
         )
           .then((executions) => {
             if (cancelled) {
               return;
             }
 
-            setNodeInlineExecutions((previous) => {
-              const next = { ...previous, ...executions };
+            setNodeInlineExecutions((previous) =>
+              mergeInlineExecutionsFromRun(previous, executions),
+            );
 
-              for (const [nodeId, inline] of Object.entries(next)) {
-                if (inline.status === "updating") {
-                  delete next[nodeId];
-                }
-              }
-
+            setNodes((current) => {
+              const next = applyCropOutputsToNodeData(current, executions);
+              nodesRef.current = next;
               return next;
             });
           })
           .catch((error) => {
             console.error(
-              "[poll] getLatestWorkflowInlineExecutions failed:",
+              "[poll] getWorkflowRunInlineExecutions failed:",
               error,
             );
             if (!cancelled) {
@@ -2040,6 +2086,11 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
           ...previous,
           ...executions,
         }));
+        setNodes((current) => {
+          const next = applyCropOutputsToNodeData(current, executions);
+          nodesRef.current = next;
+          return next;
+        });
       }
     });
 

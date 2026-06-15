@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db, ensureDbReady, withFreshLocalRead } from "@/lib/db";
 import { parseStoredGraph } from "@/lib/workflow/canvas";
 import { planExecutionNodeIds } from "@/lib/workflow/execution/dag";
+import { normalizeCropExecutionOutput } from "@/lib/workflow/execution/crop-output-normalize";
 import { persistExecutionGraphRaw } from "@/lib/workflow/execution/execution-graph";
 import { createWorkflowRunRecord, nodeDisplayName } from "@/lib/workflow/execution/run-store";
 import type { workflowOrchestratorTask } from "@/trigger/workflow-orchestrator";
@@ -65,6 +66,17 @@ function mapExecutionStatusToRuntime(
   return null;
 }
 
+function normalizeExecutionOutput(
+  nodeType: string,
+  output: unknown,
+): unknown {
+  if (nodeType === "cropImage") {
+    return normalizeCropExecutionOutput(output) ?? output;
+  }
+
+  return output;
+}
+
 function mapExecutionsToSnapshots(
   executions: NodeExecutionDetail[],
 ): Record<string, NodeExecutionSnapshot> {
@@ -79,7 +91,7 @@ function mapExecutionsToSnapshots(
 
     nodeExecutions[execution.nodeId] = {
       status: runtimeStatus,
-      output: execution.output,
+      output: normalizeExecutionOutput(execution.nodeType, execution.output),
       error: execution.error,
     };
   }
@@ -131,6 +143,18 @@ function mapRunExecutions(
       durationMs: execution.durationMs,
     }),
   );
+}
+
+export async function getWorkflowRunInlineExecutions(
+  runId: string,
+): Promise<Record<string, NodeInlineExecutionState>> {
+  const detail = await getWorkflowRunDetail(runId);
+
+  if (!detail) {
+    return {};
+  }
+
+  return mapSnapshotsToInlineState(mapExecutionsToSnapshots(detail.executions));
 }
 
 export async function getLatestWorkflowInlineExecutions(
@@ -259,6 +283,16 @@ export async function startWorkflowRun(
         userId,
         scope: scope as RunScope,
         plannedNodeIds,
+        targetNodeIds:
+          scope === "single"
+            ? selectedNodeIds.slice(0, 1)
+            : scope === "partial"
+              ? selectedNodeIds
+              : [],
+        nodeExecutionIds: run.executions.map((execution) => ({
+          nodeId: execution.nodeId,
+          executionId: execution.id,
+        })),
       },
     );
 

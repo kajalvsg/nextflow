@@ -160,7 +160,12 @@ export async function settlePlannedExecutions(
     const record = executions.find((item) => item.id === execution.id);
 
     if (record?.status === "pending") {
-      await markNodeExecutionSkipped(execution.id);
+      await markNodeExecutionFailed(
+        execution.id,
+        null,
+        "Node did not execute.",
+        new Date(),
+      );
     }
   }
 }

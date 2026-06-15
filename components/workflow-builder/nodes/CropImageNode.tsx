@@ -20,6 +20,16 @@ export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData
   const config = data.config as CropImageConfig;
   const inputImageConnected = isTargetHandleConnected(id, "input_image");
   const inputImageResolved = getConnectedInput(id, "input_image");
+  const inlineExecution = getNodeInlineExecution(id);
+  const persistedOutput =
+    inlineExecution ??
+    (data.outputs
+      ? {
+          status: "success" as const,
+          output: data.outputs,
+          error: null,
+        }
+      : null);
 
   const updateConfig = (patch: Partial<CropImageConfig>) => {
     updateNodeData(id, (current) => ({
@@ -92,7 +102,7 @@ export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData
           dense
           label="Output Image"
           nodeType="cropImage"
-          inlineExecution={getNodeInlineExecution(id)}
+          inlineExecution={persistedOutput}
           outputHandleId="output_image"
         />
       </NodeCardShell>

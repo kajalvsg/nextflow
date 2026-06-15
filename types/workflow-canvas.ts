@@ -79,6 +79,8 @@ export type WorkflowNodeData = {
   label: string;
   nodeType: WorkflowNodeType;
   locked?: boolean;
+  /** Latest execution output applied to the canvas after a run completes. */
+  outputs?: Record<string, unknown>;
   config:
     | RequestInputsConfig
     | CropImageConfig

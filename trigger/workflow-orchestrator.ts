@@ -58,6 +58,10 @@ export type WorkflowOrchestratorPayload = {
   userId: string;
   scope: RunScope;
   plannedNodeIds: string[];
+  /** Nodes the user explicitly chose to run (single/partial scope). */
+  targetNodeIds?: string[];
+  /** Execution row ids from run creation — avoids Neon read-after-write gaps. */
+  nodeExecutionIds?: Array<{ nodeId: string; executionId: string }>;
   /** @deprecated Loaded from DB — kept for backward compatibility with in-flight runs. */
   nodes?: Record<string, unknown>[];
   edges?: Record<string, unknown>[];
@@ -68,6 +72,90 @@ type ExecutionRecord = {
   nodeId: string;
 };
 
+const EXECUTION_LOAD_ATTEMPTS = 5;
+const EXECUTION_LOAD_DELAY_MS = 300;
+
+type WorkflowRunWithExecutions = {
+  id: string;
+  workflowId: string;
+  userId: string;
+  status: string;
+  scope: string;
+  startedAt: Date;
+  endedAt: Date | null;
+  durationMs: number | null;
+  executions: Array<{
+    id: string;
+    nodeId: string;
+    nodeType: string;
+    status: string;
+  }>;
+};
+
+async function loadWorkflowRunWithExecutions(
+  runId: string,
+  plannedNodeIds: Set<string>,
+): Promise<WorkflowRunWithExecutions> {
+  let lastRun: WorkflowRunWithExecutions | null = null;
+
+  for (let attempt = 1; attempt <= EXECUTION_LOAD_ATTEMPTS; attempt += 1) {
+    const run = await db.workflowRun.findUnique({
+      where: { id: runId },
+      include: { executions: true },
+    });
+
+    if (!run) {
+      throw new Error("Workflow run not found.");
+    }
+
+    lastRun = run;
+
+    const hasPlannedExecutions = [...plannedNodeIds].every((nodeId) =>
+      run.executions.some((execution) => execution.nodeId === nodeId),
+    );
+
+    if (hasPlannedExecutions || plannedNodeIds.size === 0) {
+      return run;
+    }
+
+    if (attempt < EXECUTION_LOAD_ATTEMPTS) {
+      logOrchestrator(
+        `waiting for execution rows (${run.executions.length}/${plannedNodeIds.size}) attempt ${attempt}`,
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, EXECUTION_LOAD_DELAY_MS * attempt),
+      );
+    }
+  }
+
+  return lastRun!;
+}
+
+function buildExecutionByNodeId(
+  runExecutions: Array<{ id: string; nodeId: string }>,
+  payloadExecutions: WorkflowOrchestratorPayload["nodeExecutionIds"],
+): Map<string, ExecutionRecord> {
+  const executionByNodeId = new Map<string, ExecutionRecord>();
+
+  for (const execution of payloadExecutions ?? []) {
+    executionByNodeId.set(execution.nodeId, {
+      id: execution.executionId,
+      nodeId: execution.nodeId,
+    });
+  }
+
+  for (const execution of runExecutions) {
+    if (!executionByNodeId.has(execution.nodeId)) {
+      executionByNodeId.set(execution.nodeId, {
+        id: execution.id,
+        nodeId: execution.nodeId,
+      });
+    }
+  }
+
+  return executionByNodeId;
+}
+
 export const workflowOrchestratorTask = task({
   id: "workflow-orchestrator",
   retry: {
@@ -76,14 +164,10 @@ export const workflowOrchestratorTask = task({
   run: async (payload: WorkflowOrchestratorPayload) => {
     await ensureDbReady();
 
-    const run = await db.workflowRun.findUnique({
-      where: { id: payload.runId },
-      include: { executions: true },
-    });
-
-    if (!run) {
-      throw new Error("Workflow run not found.");
-    }
+    const run = await loadWorkflowRunWithExecutions(
+      payload.runId,
+      new Set(payload.plannedNodeIds),
+    );
 
     const startedAt = run.startedAt;
 
@@ -101,13 +185,20 @@ export const workflowOrchestratorTask = task({
       extractRequestInputsImageSourcesFromRawNodes(rawNodes);
 
     const plannedNodeIds = new Set(payload.plannedNodeIds);
+    const targetNodeIds = new Set(payload.targetNodeIds ?? []);
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-    const executionByNodeId = new Map<string, ExecutionRecord>(
-      run.executions.map((execution) => [
-        execution.nodeId,
-        { id: execution.id, nodeId: execution.nodeId },
-      ]),
+    const executionByNodeId = buildExecutionByNodeId(
+      run.executions,
+      payload.nodeExecutionIds,
     );
+
+    for (const nodeId of plannedNodeIds) {
+      if (!executionByNodeId.has(nodeId)) {
+        logOrchestrator(
+          `missing execution record for planned node ${nodeId}`,
+        );
+      }
+    }
 
     const outputs: NodeOutputMap = new Map();
 
@@ -162,7 +253,12 @@ export const workflowOrchestratorTask = task({
       finishedNodeIds.add(nodeId);
       hasFailure = true;
 
-      await markNodeExecutionSkipped(execution.id);
+      await markNodeExecutionFailed(
+        execution.id,
+        null,
+        reason,
+        new Date(),
+      );
     };
 
     const completeNodeSuccess = async (
@@ -763,6 +859,25 @@ export const workflowOrchestratorTask = task({
           nodeId,
           buildNodeInputRecord(node, edges, outputs, nodes),
           "Crop Image did not produce output.",
+          new Date(),
+        );
+      }
+
+      for (const nodeId of targetNodeIds) {
+        if (finishedNodeIds.has(nodeId) || !plannedNodeIds.has(nodeId)) {
+          continue;
+        }
+
+        const node = nodeMap.get(nodeId);
+
+        if (!node) {
+          continue;
+        }
+
+        await completeNodeFailure(
+          nodeId,
+          buildNodeInputRecord(node, edges, outputs, nodes),
+          "Selected node did not execute.",
           new Date(),
         );
       }

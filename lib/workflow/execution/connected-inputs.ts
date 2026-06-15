@@ -101,6 +101,14 @@ function buildExecutionStateMap(
         status: snapshot.status,
         output: snapshot.output,
       });
+      continue;
+    }
+
+    if (node.data.nodeType === "cropImage" && isRecord(node.data.outputs)) {
+      states.set(node.id, {
+        status: "success",
+        output: node.data.outputs,
+      });
     }
   }
 
