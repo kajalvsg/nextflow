@@ -5,6 +5,8 @@ const LOCAL_DATABASE_FLAGS = [
   "USE_PGLITE",
 ];
 
+const REMOTE_DATABASE_FLAGS = ["FORCE_REMOTE_DB", "USE_REMOTE_DB"];
+
 function isEnvFlagEnabled(name) {
   const value = process.env[name]?.trim().toLowerCase();
 
@@ -17,11 +19,19 @@ export function hasPostgresDatabaseUrl() {
   return url.startsWith("postgresql://") || url.startsWith("postgres://");
 }
 
-function isExplicitLocalDatabaseRequested() {
+export function isExplicitLocalDatabaseRequested() {
   return LOCAL_DATABASE_FLAGS.some((flag) => isEnvFlagEnabled(flag));
 }
 
+function isRemoteDatabaseForced() {
+  return REMOTE_DATABASE_FLAGS.some((flag) => isEnvFlagEnabled(flag));
+}
+
 export function isLocalDatabaseEnabled() {
+  if (isRemoteDatabaseForced()) {
+    return false;
+  }
+
   if (hasPostgresDatabaseUrl()) {
     return false;
   }

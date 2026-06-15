@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
-import { prisma, initializeLocalPrisma } from "@/lib/prisma";
+import { prisma, initializeLocalPrisma, ensureRemotePrismaClient } from "@/lib/prisma";
+import { resolveDatabaseBackend } from "@/lib/db/database-mode";
 import {
   initLocalDatabase,
   isLocalDatabaseEnabled,
@@ -17,7 +18,10 @@ export function resetDbReadyState(): void {
 }
 
 export async function ensureDbReady(): Promise<void> {
-  if (!isLocalDatabaseEnabled()) {
+  const mode = await resolveDatabaseBackend();
+
+  if (mode === "postgres") {
+    ensureRemotePrismaClient();
     return;
   }
 

@@ -9,6 +9,10 @@ import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
 import { hasPostgresDatabaseUrl, isLocalDatabaseEnabled } from "./lib/database-mode.mjs";
+import {
+  normalizeDatabaseUrl,
+  resolveRemoteDatabaseConnection,
+} from "./lib/neon-probe.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, "..");
@@ -50,22 +54,29 @@ async function pushToLocalDatabase() {
 
 async function pushToRemoteDatabase(connectionString) {
   const host = new URL(connectionString).hostname;
-  const normalized = normalizeDatabaseUrl(connectionString);
 
   console.log(`Connecting to Neon/Postgres host: ${host}...`);
 
   if (connectionString.includes("channel_binding")) {
-    console.log("Note: removed channel_binding from connection URL (not supported by Node pg).");
+    console.log(
+      "Note: removed channel_binding from connection URL (not supported by Node pg).",
+    );
+  }
+
+  const resolved = await resolveRemoteDatabaseConnection(12_000);
+
+  if (!resolved) {
+    throw new Error("Could not reach database after multiple attempts.");
   }
 
   const client = new pg.Client({
-    connectionString: normalized,
+    connectionString: normalizeDatabaseUrl(resolved.connectionString),
     connectionTimeoutMillis: 30_000,
   });
 
   try {
     await client.connect();
-    console.log("Connected. Applying schema...");
+    console.log(`Connected via ${resolved.kind}. Applying schema...`);
     await client.query(sql);
     console.log("✅ Schema applied successfully!");
     console.log("   Tables: Workflow, WorkflowRun, NodeExecution");

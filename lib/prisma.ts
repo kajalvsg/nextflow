@@ -1,10 +1,9 @@
 import "server-only";
 
 import type { PGlite } from "@electric-sql/pglite";
-import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { PrismaPGlite } from "pglite-prisma-adapter";
-import { getPgPoolConfig } from "@/lib/db/connection";
+import { createRemotePrismaAdapter } from "@/lib/db/neon-client";
 import {
   getDatabaseMode,
   hasPostgresDatabaseUrl,
@@ -18,7 +17,7 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function createRemotePrismaClient(): PrismaClient {
-  const adapter = new PrismaPg(getPgPoolConfig());
+  const adapter = createRemotePrismaAdapter();
 
   return new PrismaClient({
     adapter,
@@ -87,10 +86,8 @@ function getRemotePrismaClient(): PrismaClient {
   return globalForPrisma.prisma;
 }
 
-if (!isLocalDatabaseEnabled()) {
-  if (hasPostgresDatabaseUrl()) {
-    getRemotePrismaClient();
-  }
+export function ensureRemotePrismaClient(): PrismaClient {
+  return getRemotePrismaClient();
 }
 
 function getActivePrismaClient(): PrismaClient {

@@ -3,22 +3,18 @@ export async function register() {
     return;
   }
 
-  const { getDatabaseMode, isLocalDatabaseEnabled } = await import(
-    "@/lib/db/database-mode"
-  );
+  // Defer DB bootstrap so app routes compile immediately in dev.
+  void (async () => {
+    const { resolveDatabaseBackend, getDatabaseModeReason } = await import(
+      "@/lib/db/database-mode"
+    );
+    const { ensureDbReady } = await import("@/lib/db");
 
-  if (!isLocalDatabaseEnabled()) {
+    await resolveDatabaseBackend();
+    await ensureDbReady();
+
     if (process.env.NODE_ENV === "development") {
-      console.info(`[db] Using ${getDatabaseMode()} database (DATABASE_URL).`);
+      console.info(`[db] ${getDatabaseModeReason()}`);
     }
-
-    return;
-  }
-
-  const { ensureDbReady } = await import("@/lib/db");
-  await ensureDbReady();
-
-  if (process.env.NODE_ENV === "development") {
-    console.info("[db] Using local PGlite database.");
-  }
+  })();
 }

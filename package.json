@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0",
+    "dev:clean": "node scripts/clean-dev.mjs && next dev --hostname 0.0.0.0",
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
@@ -21,6 +22,7 @@
     "@clerk/ui": "^1.13.1",
     "@electric-sql/pglite": "^0.5.2",
     "@google/generative-ai": "^0.24.1",
+    "@neondatabase/serverless": "^1.1.0",
     "@prisma/adapter-neon": "^7.8.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^6.19.0",
