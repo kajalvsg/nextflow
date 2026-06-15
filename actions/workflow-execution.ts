@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db, ensureDbReady, withFreshLocalRead } from "@/lib/db";
 import { parseStoredGraph } from "@/lib/workflow/canvas";
 import { planExecutionNodeIds } from "@/lib/workflow/execution/dag";
+import { persistExecutionGraphRaw } from "@/lib/workflow/execution/execution-graph";
 import { createWorkflowRunRecord, nodeDisplayName } from "@/lib/workflow/execution/run-store";
 import type { workflowOrchestratorTask } from "@/trigger/workflow-orchestrator";
 import type {
@@ -229,19 +230,26 @@ export async function startWorkflowRun(
         nodeType: node.data.nodeType,
       }));
 
+    const persisted = await persistExecutionGraphRaw(
+      normalizedWorkflowId,
+      userId,
+      clientNodes,
+      clientEdges,
+    );
+
+    if (!persisted) {
+      return {
+        success: false,
+        error: "Failed to persist workflow graph before run.",
+      };
+    }
+
     const run = await createWorkflowRunRecord({
       workflowId: normalizedWorkflowId,
       userId,
       scope: scope as RunScope,
       plannedNodes,
     });
-
-    const triggerPayload = JSON.parse(
-      JSON.stringify({ nodes: clientNodes, edges: clientEdges }),
-    ) as {
-      nodes: Record<string, unknown>[];
-      edges: Record<string, unknown>[];
-    };
 
     await tasks.trigger<typeof workflowOrchestratorTask>(
       "workflow-orchestrator",
@@ -250,8 +258,6 @@ export async function startWorkflowRun(
         workflowId: normalizedWorkflowId,
         userId,
         scope: scope as RunScope,
-        nodes: triggerPayload.nodes,
-        edges: triggerPayload.edges,
         plannedNodeIds,
       },
     );

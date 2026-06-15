@@ -168,8 +168,8 @@ export async function saveWorkflowGraph(
     await db.workflow.update({
       where: { id: existing.id },
       data: {
-        nodes: nodes as unknown as object,
-        edges: edges as unknown as object,
+        nodes: rawNodes as object,
+        edges: rawEdges as object,
       },
     });
 

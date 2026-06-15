@@ -1,5 +1,4 @@
 import { batch, task } from "@trigger.dev/sdk/v3";
-import { parseStoredGraph } from "@/lib/workflow/canvas";
 import {
   LOCAL_NODE_TYPES,
   computeExecutionLevels,
@@ -37,6 +36,12 @@ import {
   settlePlannedExecutions,
 } from "@/lib/workflow/execution/run-store";
 import { db, ensureDbReady } from "@/lib/db";
+import {
+  buildRequestInputsOutputFromRawSources,
+  extractRequestInputsImageSourcesFromRawNodes,
+  loadExecutionGraphFromWorkflow,
+  logRequestInputsImageSources,
+} from "@/lib/workflow/execution/execution-graph";
 import type { RunScope, RunStatus } from "@/types/workflow-execution";
 import type { WorkflowNodeData } from "@/types/workflow-canvas";
 import { cropImageTask } from "./crop-image";
@@ -51,9 +56,10 @@ export type WorkflowOrchestratorPayload = {
   workflowId: string;
   userId: string;
   scope: RunScope;
-  nodes: Record<string, unknown>[];
-  edges: Record<string, unknown>[];
   plannedNodeIds: string[];
+  /** @deprecated Loaded from DB — kept for backward compatibility with in-flight runs. */
+  nodes?: Record<string, unknown>[];
+  edges?: Record<string, unknown>[];
 };
 
 type ExecutionRecord = {
@@ -79,7 +85,20 @@ export const workflowOrchestratorTask = task({
     }
 
     const startedAt = run.startedAt;
-    const { nodes, edges } = parseStoredGraph(payload.nodes, payload.edges);
+
+    const loadedGraph = await loadExecutionGraphFromWorkflow(
+      payload.workflowId,
+      payload.userId,
+    );
+
+    if (!loadedGraph) {
+      throw new Error("Workflow graph not found for execution.");
+    }
+
+    const { nodes, edges, rawNodes } = loadedGraph;
+    const rawImageSources =
+      extractRequestInputsImageSourcesFromRawNodes(rawNodes);
+
     const plannedNodeIds = new Set(payload.plannedNodeIds);
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
     const executionByNodeId = new Map<string, ExecutionRecord>(
@@ -93,7 +112,20 @@ export const workflowOrchestratorTask = task({
 
     for (const node of nodes) {
       if (node.data.nodeType === "requestInputs") {
-        outputs.set(node.id, resolveRequestInputsOutput(node));
+        let output = resolveRequestInputsOutput(node);
+        const rawSources = rawImageSources.get(node.id);
+
+        if (rawSources) {
+          logRequestInputsImageSources(node.id, rawSources);
+          const rawOutput = buildRequestInputsOutputFromRawSources(rawSources);
+          output = { ...output, ...rawOutput };
+        } else {
+          console.info(
+            `[execution-graph] ${node.id} hasDataUrl=false (parsed output only)`,
+          );
+        }
+
+        outputs.set(node.id, output);
       }
     }
 
