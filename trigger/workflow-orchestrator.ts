@@ -6,8 +6,8 @@ import {
   getNodeDependencyStatus,
 } from "@/lib/workflow/execution/dag";
 import {
-  GEMINI_DEMO_FALLBACK_RESPONSE,
   getDemoModeSkipError,
+  getGeminiFallbackResponse,
   isDemoModeEnabled,
   shouldUseGeminiDemoFallback,
 } from "@/lib/workflow/execution/gemini-demo";
@@ -25,6 +25,7 @@ import {
   buildNodeInputRecord,
   countMissingConnectedImages,
   logPropagatedOutputs,
+  resolveRequestInputsOutput,
   type NodeOutputMap,
 } from "@/lib/workflow/execution/resolve-inputs";
 import {
@@ -89,6 +90,13 @@ export const workflowOrchestratorTask = task({
     );
 
     const outputs: NodeOutputMap = new Map();
+
+    for (const node of nodes) {
+      if (node.data.nodeType === "requestInputs") {
+        outputs.set(node.id, resolveRequestInputsOutput(node));
+      }
+    }
+
     const successfulNodeIds = new Set<string>();
     const failedNodeIds = new Set<string>();
     const finishedNodeIds = new Set<string>();
@@ -325,24 +333,24 @@ export const workflowOrchestratorTask = task({
 
       const applyGeminiDemoFallback = async (errorMessage: string) => {
         const fallbackOutput = {
-          response: GEMINI_DEMO_FALLBACK_RESPONSE,
+          response: getGeminiFallbackResponse(node.data.label, nodeId),
+          _fallback: true,
+          _geminiError: errorMessage,
         };
 
         hasDemoFallback = true;
-        outputs.set(nodeId, fallbackOutput);
-        successfulNodeIds.add(nodeId);
-        finishedNodeIds.add(nodeId);
 
-        await markNodeExecutionFailed(
-          execution.id,
-          input,
-          errorMessage,
-          nodeStartedAt,
+        await completeNodeSuccess(
+          nodeId,
+          {
+            ...input,
+            _geminiError: errorMessage,
+          },
           fallbackOutput,
+          nodeStartedAt,
         );
 
-        logOrchestrator(`node completed ${nodeId} (demo fallback)`);
-        logPropagatedOutputs(nodeId, edges, nodes);
+        logOrchestrator(`node completed ${nodeId} (gemini fallback)`);
       };
 
       try {

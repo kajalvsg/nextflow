@@ -11,6 +11,7 @@ import {
 import {
   getDemoModeSkipError,
   isDemoModeEnabled,
+  isRetryableGeminiServiceError,
 } from "@/lib/workflow/execution/gemini-demo";
 
 export type GeminiInvokeInput = {
@@ -39,15 +40,7 @@ type GeminiGenerateRequest = {
 };
 
 export function isGeminiQuotaErrorMessage(message: string): boolean {
-  const lower = message.toLowerCase();
-
-  return (
-    lower.includes("429") ||
-    lower.includes("quota exceeded") ||
-    lower.includes("too many requests") ||
-    lower.includes("rate limit") ||
-    lower.includes("resource_exhausted")
-  );
+  return isRetryableGeminiServiceError(message);
 }
 
 export function getGeminiConfigError(): string | null {
@@ -64,9 +57,12 @@ export function formatGeminiError(error: unknown): string {
 
   if (
     message.includes("429") ||
+    message.includes("503") ||
     message.toLowerCase().includes("quota exceeded") ||
     message.toLowerCase().includes("too many requests") ||
-    message.toLowerCase().includes("resource_exhausted")
+    message.toLowerCase().includes("resource_exhausted") ||
+    message.toLowerCase().includes("service unavailable") ||
+    message.toLowerCase().includes("high demand")
   ) {
     const model = getGeminiModelName();
     return `Gemini API quota exceeded for model "${model}". Try GEMINI_MODEL=gemini-1.5-flash or gemini-2.5-flash, enable billing, or wait for your free-tier quota to reset.`;
@@ -190,6 +186,17 @@ async function buildGeminiParts(
   return parts;
 }
 
+const GEMINI_RETRY_DELAYS_MS = [3_000, 6_000, 12_000] as const;
+const GEMINI_MAX_RETRIES = 3;
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableGeminiHttpStatus(status: number): boolean {
+  return status === 429 || status === 503 || status === 502 || status === 504;
+}
+
 async function invokeGeminiViaRestApi(
   input: GeminiInvokeInput,
 ): Promise<GeminiInvokeResult> {
@@ -224,83 +231,115 @@ async function invokeGeminiViaRestApi(
     };
   }
 
-  const startedAt = Date.now();
+  let lastFailure: GeminiInvokeResult | null = null;
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": apiKey,
-    },
-    body: JSON.stringify(requestBody),
-  });
+  for (let attempt = 0; attempt <= GEMINI_MAX_RETRIES; attempt += 1) {
+    const startedAt = Date.now();
 
-  const rawBody = await response.text();
-  const durationMs = Date.now() - startedAt;
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
+      body: JSON.stringify(requestBody),
+    });
 
-  logGeminiDebug("response received", {
-    status: response.status,
-    statusText: response.statusText,
-    ok: response.ok,
-    durationMs,
-    bodyLength: rawBody.length,
-  });
+    const rawBody = await response.text();
+    const durationMs = Date.now() - startedAt;
 
-  if (!response.ok) {
-    const parsedBody = parseGeminiApiErrorBody(rawBody);
-    const summarizedBody = summarizeGeminiApiErrorBody(parsedBody);
-    const quotaExceeded =
-      response.status === 429 || isGeminiQuotaErrorMessage(rawBody);
-
-    logGeminiDebug("Gemini API error response", {
+    logGeminiDebug("response received", {
       status: response.status,
       statusText: response.statusText,
+      ok: response.ok,
+      durationMs,
+      bodyLength: rawBody.length,
+      attempt: attempt + 1,
+    });
+
+    if (!response.ok) {
+      const parsedBody = parseGeminiApiErrorBody(rawBody);
+      const summarizedBody = summarizeGeminiApiErrorBody(parsedBody);
+      const quotaExceeded =
+        response.status === 429 || isGeminiQuotaErrorMessage(rawBody);
+
+      logGeminiDebug("Gemini API error response", {
+        status: response.status,
+        statusText: response.statusText,
+        model: modelName,
+        endpoint,
+        quotaExceeded,
+        errorBody: summarizedBody,
+        rawBodyPreview: rawBody.slice(0, 2000),
+        attempt: attempt + 1,
+      });
+
+      const apiMessage =
+        typeof summarizedBody.message === "string"
+          ? summarizedBody.message
+          : rawBody.slice(0, 500);
+
+      const errorMessage = formatGeminiError(
+        new Error(
+          `[${response.status} ${response.statusText}] ${apiMessage}`,
+        ),
+      );
+
+      lastFailure = {
+        success: false,
+        error: errorMessage,
+        quotaExceeded,
+      };
+
+      const shouldRetry =
+        attempt < GEMINI_MAX_RETRIES &&
+        (isRetryableGeminiHttpStatus(response.status) ||
+          isRetryableGeminiServiceError(errorMessage));
+
+      if (shouldRetry) {
+        const delayMs = GEMINI_RETRY_DELAYS_MS[attempt] ?? 12_000;
+        logGeminiDebug("retrying Gemini request", {
+          attempt: attempt + 1,
+          delayMs,
+          errorMessage,
+        });
+        await wait(delayMs);
+        continue;
+      }
+
+      return lastFailure;
+    }
+
+    let parsedSuccessBody: unknown;
+
+    try {
+      parsedSuccessBody = JSON.parse(rawBody) as unknown;
+    } catch (error) {
+      logGeminiDebug("failed to parse Gemini success body", {
+        error: error instanceof Error ? error.message : String(error),
+        rawBodyPreview: rawBody.slice(0, 500),
+      });
+      throw error;
+    }
+
+    const text = extractGeminiResponseText(parsedSuccessBody);
+
+    logGeminiDebug("Gemini API success", {
       model: modelName,
-      endpoint,
-      quotaExceeded,
-      errorBody: summarizedBody,
-      rawBodyPreview: rawBody.slice(0, 2000),
+      responseLength: text.length,
+      durationMs,
+      attempt: attempt + 1,
     });
 
-    const apiMessage =
-      typeof summarizedBody.message === "string"
-        ? summarizedBody.message
-        : rawBody.slice(0, 500);
+    return { success: true, text };
+  }
 
-    const errorMessage = formatGeminiError(
-      new Error(
-        `[${response.status} ${response.statusText}] ${apiMessage}`,
-      ),
-    );
-
-    return {
+  return (
+    lastFailure ?? {
       success: false,
-      error: errorMessage,
-      quotaExceeded,
-    };
-  }
-
-  let parsedSuccessBody: unknown;
-
-  try {
-    parsedSuccessBody = JSON.parse(rawBody) as unknown;
-  } catch (error) {
-    logGeminiDebug("failed to parse Gemini success body", {
-      error: error instanceof Error ? error.message : String(error),
-      rawBodyPreview: rawBody.slice(0, 500),
-    });
-    throw error;
-  }
-
-  const text = extractGeminiResponseText(parsedSuccessBody);
-
-  logGeminiDebug("Gemini API success", {
-    model: modelName,
-    responseLength: text.length,
-    durationMs,
-  });
-
-  return { success: true, text };
+      error: "Gemini request failed after retries.",
+    }
+  );
 }
 
 export async function invokeGemini(

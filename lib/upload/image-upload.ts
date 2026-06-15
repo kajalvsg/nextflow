@@ -79,13 +79,67 @@ function getAppBaseUrl(): string {
     return configured.replace(/\/$/, "");
   }
 
-  const vercelUrl = process.env.VERCEL_URL?.trim();
+  const vercelUrl =
+    process.env.VERCEL_URL?.trim() ||
+    process.env.NEXT_PUBLIC_VERCEL_URL?.trim();
 
   if (vercelUrl) {
-    return `https://${vercelUrl.replace(/\/$/, "")}`;
+    const normalized = vercelUrl.replace(/\/$/, "");
+    return normalized.startsWith("http") ? normalized : `https://${normalized}`;
   }
 
   return "http://localhost:3000";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Pull a stored image reference from strings or nested upload metadata. */
+export function extractStoredImageReference(value: unknown): string | null {
+  if (typeof value === "string") {
+    return normalizeStoredImageUrl(value);
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const directKeys = [
+    "fileUrl",
+    "url",
+    "previewUrl",
+    "imageUrl",
+    "image_field",
+    "imageField",
+    "value",
+  ] as const;
+
+  for (const key of directKeys) {
+    const candidate = value[key];
+
+    if (typeof candidate === "string") {
+      const normalized = normalizeStoredImageUrl(candidate);
+
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    if (isRecord(candidate)) {
+      const nested = extractStoredImageReference(candidate);
+
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+
+  if (isRecord(value.imageValue)) {
+    return extractStoredImageReference(value.imageValue);
+  }
+
+  return null;
 }
 
 /** Canonical stored reference for workflow asset uploads. */
@@ -120,7 +174,8 @@ export function normalizeStoredImageUrl(
   if (
     trimmed.startsWith("http://") ||
     trimmed.startsWith("https://") ||
-    trimmed.startsWith("/workflow-assets/")
+    trimmed.startsWith("/workflow-assets/") ||
+    trimmed.startsWith("/")
   ) {
     return trimmed;
   }
@@ -149,39 +204,39 @@ export function getExecutableImageUrl(
     return trimmed;
   }
 
-  if (trimmed.startsWith("/workflow-assets/")) {
+  if (trimmed.startsWith("/")) {
     return `${getAppBaseUrl()}${trimmed}`;
   }
 
   return null;
 }
 
-export function getImagePreviewUrl(
-  imageValue: ImageFieldState | null | undefined,
-): string | null {
-  const fileUrl = imageValue?.fileUrl?.trim();
-
-  if (!fileUrl) {
-    return null;
-  }
-
-  if (fileUrl.startsWith("blob:") || fileUrl.startsWith("data:image/")) {
-    return fileUrl;
-  }
-
-  return getExecutableImageUrl(fileUrl) ?? fileUrl;
-}
-
 export function resolveImageFieldForExecution(
   imageValue: ImageFieldState | null | undefined,
 ): string | null {
-  const fileUrl = normalizeStoredImageUrl(imageValue?.fileUrl ?? null);
+  const reference = extractStoredImageReference(imageValue);
 
-  if (!fileUrl) {
+  if (!reference) {
     return null;
   }
 
-  return getExecutableImageUrl(fileUrl);
+  return getExecutableImageUrl(reference) ?? reference;
+}
+
+export function getImagePreviewUrl(
+  imageValue: ImageFieldState | null | undefined,
+): string | null {
+  const reference = extractStoredImageReference(imageValue);
+
+  if (!reference) {
+    return null;
+  }
+
+  if (reference.startsWith("blob:") || reference.startsWith("data:image/")) {
+    return reference;
+  }
+
+  return getExecutableImageUrl(reference) ?? reference;
 }
 
 export function isExecutableImageUrl(value: string | null | undefined): boolean {

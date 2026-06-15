@@ -1,5 +1,6 @@
 import type { Edge, Node } from "reactflow";
 import {
+  extractStoredImageReference,
   getExecutableImageUrl,
   normalizeStoredImageUrl,
   resolveImageFieldForExecution,
@@ -10,7 +11,7 @@ import {
   normalizeRequestInputsConfig,
 } from "@/lib/workflow/request-inputs-fields";
 import type { NodeOutputMap } from "@/lib/workflow/execution/resolve-inputs";
-import type { ImageFieldState, WorkflowNodeData } from "@/types/workflow-canvas";
+import type { WorkflowNodeData } from "@/types/workflow-canvas";
 
 export const IMAGE_SOURCE_HANDLES = new Set(["image_field", "output_image"]);
 
@@ -22,10 +23,6 @@ export const CROP_OUTPUT_IMAGE_KEYS = [
 
 export const CROP_IMAGE_INPUT_ERROR =
   "Crop Image requires a connected uploaded image.";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function getSourceNodeType(
   nodes: Node<WorkflowNodeData>[],
@@ -112,12 +109,46 @@ export function normalizeImageInputUrl(value: unknown): string | null {
   return getExecutableImageUrl(stored) ?? stored;
 }
 
-function resolveImageFieldMeta(value: unknown): string | null {
-  if (!isRecord(value)) {
-    return null;
+function collectImageCandidates(
+  sourceOutput: Record<string, unknown>,
+  sourceHandle: string,
+): string[] {
+  const normalizedHandle =
+    normalizeImageSourceHandle(sourceHandle) ?? sourceHandle;
+  const candidates: unknown[] = [
+    sourceOutput[normalizedHandle],
+    sourceOutput[sourceHandle],
+    sourceOutput.image_field,
+    sourceOutput.imageField,
+    sourceOutput[`${normalizedHandle}_meta`],
+    sourceOutput[`${sourceHandle}_meta`],
+    sourceOutput.image_field_meta,
+  ];
+
+  for (const [key, value] of Object.entries(sourceOutput)) {
+    if (key.endsWith("_meta")) {
+      candidates.push(value);
+    }
   }
 
-  return resolveImageFieldForExecution(value as ImageFieldState);
+  const urls: string[] = [];
+
+  for (const candidate of candidates) {
+    const reference = extractStoredImageReference(candidate);
+
+    if (!reference) {
+      continue;
+    }
+
+    const executable =
+      getExecutableImageUrl(reference) ?? normalizeImageInputUrl(reference);
+
+    if (executable) {
+      urls.push(executable);
+    }
+  }
+
+  return urls;
 }
 
 export function readCropOutputImage(
@@ -145,23 +176,9 @@ function readImageFromOutputRecord(
     return readCropOutputImage(sourceOutput);
   }
 
-  const direct = normalizeImageInputUrl(sourceOutput[normalizedHandle]);
+  const candidates = collectImageCandidates(sourceOutput, sourceHandle);
 
-  if (direct) {
-    return direct;
-  }
-
-  const meta = sourceOutput[`${normalizedHandle}_meta`];
-
-  if (meta) {
-    const fromMeta = resolveImageFieldMeta(meta);
-
-    if (fromMeta) {
-      return fromMeta;
-    }
-  }
-
-  return null;
+  return candidates[0] ?? null;
 }
 
 function readImageFromNodeConfig(
@@ -182,7 +199,11 @@ function readImageFromNodeConfig(
     return null;
   }
 
-  return resolveImageFieldForExecution(field.imageValue);
+  return (
+    resolveImageFieldForExecution(field.imageValue) ??
+    extractStoredImageReference(field.imageValue) ??
+    extractStoredImageReference(field)
+  );
 }
 
 export function resolveImageValue(
