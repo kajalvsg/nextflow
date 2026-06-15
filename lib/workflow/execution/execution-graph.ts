@@ -128,6 +128,56 @@ export function buildRequestInputsOutputFromRawSources(
   return output;
 }
 
+function hasExecutableImagePayload(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) {
+    return typeof value === "string" && value.startsWith("data:image/");
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return Boolean(
+    readDataImageUrl(record.dataUrl) ??
+      readDataImageUrl(record.value) ??
+      (isRecord(record.meta) ? readDataImageUrl(record.meta.dataUrl) : null),
+  );
+}
+
+/** Keep raw-seeded image outputs when local node output lacks dataUrl. */
+export function mergeRequestInputsOutputs(
+  seeded: Record<string, unknown>,
+  computed: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...computed };
+
+  for (const [key, seededValue] of Object.entries(seeded)) {
+    const computedValue = computed[key];
+
+    if (
+      key === "image_field" ||
+      key.startsWith("image_field") ||
+      key.endsWith("_meta")
+    ) {
+      if (hasExecutableImagePayload(seededValue)) {
+        merged[key] = seededValue;
+        continue;
+      }
+
+      if (hasExecutableImagePayload(computedValue)) {
+        merged[key] = computedValue;
+        continue;
+      }
+    }
+
+    if (computedValue !== undefined) {
+      merged[key] = computedValue;
+    } else {
+      merged[key] = seededValue;
+    }
+  }
+
+  return merged;
+}
+
 export async function persistExecutionGraphRaw(
   workflowId: string,
   userId: string,

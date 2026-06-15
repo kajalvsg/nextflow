@@ -41,6 +41,7 @@ import {
   extractRequestInputsImageSourcesFromRawNodes,
   loadExecutionGraphFromWorkflow,
   logRequestInputsImageSources,
+  mergeRequestInputsOutputs,
 } from "@/lib/workflow/execution/execution-graph";
 import type { RunScope, RunStatus } from "@/types/workflow-execution";
 import type { WorkflowNodeData } from "@/types/workflow-canvas";
@@ -259,7 +260,16 @@ export const workflowOrchestratorTask = task({
 
       try {
         const input = buildNodeInputRecord(node, edges, outputs, nodes);
-        const output = buildLocalNodeOutput(node, edges, outputs, nodes);
+        let output = buildLocalNodeOutput(node, edges, outputs, nodes);
+
+        if (node.data.nodeType === "requestInputs") {
+          const seeded = outputs.get(nodeId);
+
+          if (seeded) {
+            output = mergeRequestInputsOutputs(seeded, output);
+          }
+        }
+
         await completeNodeSuccess(nodeId, input, output, nodeStartedAt);
       } catch (error) {
         const message =
@@ -624,6 +634,18 @@ export const workflowOrchestratorTask = task({
 
         if (dependencyStatus === "waiting") {
           logOrchestrator(`missing dependency ${nodeId}: upstream not ready`);
+
+          const node = nodeMap.get(nodeId);
+
+          if (node?.data.nodeType === "cropImage") {
+            await completeNodeFailure(
+              nodeId,
+              buildNodeInputRecord(node, edges, outputs, nodes),
+              "Crop Image input was not ready when execution started.",
+              new Date(),
+            );
+          }
+
           continue;
         }
 
@@ -725,6 +747,26 @@ export const workflowOrchestratorTask = task({
       }
 
       await markSkippedNodes();
+
+      for (const nodeId of plannedNodeIds) {
+        if (finishedNodeIds.has(nodeId)) {
+          continue;
+        }
+
+        const node = nodeMap.get(nodeId);
+
+        if (node?.data.nodeType !== "cropImage") {
+          continue;
+        }
+
+        await completeNodeFailure(
+          nodeId,
+          buildNodeInputRecord(node, edges, outputs, nodes),
+          "Crop Image did not produce output.",
+          new Date(),
+        );
+      }
+
       await settlePlannedExecutions(
         run.executions,
         plannedNodeIds,

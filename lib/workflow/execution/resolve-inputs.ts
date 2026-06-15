@@ -1,6 +1,9 @@
 import type { Edge, Node } from "reactflow";
 import { normalizeEdgeForResolution } from "@/lib/workflow/execution/edge-handles";
-import { resolveImageInputFromEdge } from "@/lib/workflow/execution/image-input";
+import {
+  normalizeImageInputUrl,
+  resolveImageInputFromEdge,
+} from "@/lib/workflow/execution/image-input";
 import {
   resolveImageFieldForExecution,
   resolveImageSourceWithPriority,
@@ -8,6 +11,7 @@ import {
 } from "@/lib/upload/image-upload";
 import {
   getImageFieldExecutionState,
+  getImageFieldFromConfigFields,
   normalizeRequestInputsConfig,
 } from "@/lib/workflow/request-inputs-fields";
 import type {
@@ -37,7 +41,25 @@ export function resolveRequestInputsOutput(
       continue;
     }
 
-    const persisted = getImageFieldExecutionState(field);
+    const persisted = (() => {
+      const fromField = getImageFieldExecutionState(field);
+      const fromRaw = getImageFieldFromConfigFields(node.data.config, field.id);
+
+      if (!fromRaw) {
+        return fromField;
+      }
+
+      return getImageFieldExecutionState({
+        ...field,
+        imageValue: {
+          ...fromField,
+          ...fromRaw,
+          value: fromRaw.value ?? fromRaw.dataUrl ?? fromField.value,
+          dataUrl: fromRaw.dataUrl ?? fromField.dataUrl,
+          meta: fromRaw.meta ?? fromField.meta,
+        },
+      });
+    })();
     const imageOutput = toImageExecutionOutput(persisted);
     const resolved =
       imageOutput.value ??
@@ -176,7 +198,53 @@ export function resolveCropImageInput(
     .map((edge) => normalizeEdgeForResolution(edge, nodes))
     .find((edge) => edge.targetHandle === "input_image");
 
-  const imageUrl = resolveImageInputFromEdge(incoming, outputs, nodes);
+  let imageUrl = resolveImageInputFromEdge(incoming, outputs, nodes);
+
+  if (!imageUrl && incoming?.source) {
+    const sourceOutput = outputs.get(incoming.source);
+
+    if (sourceOutput) {
+      imageUrl =
+        normalizeImageInputUrl(sourceOutput.image_field) ??
+        normalizeImageInputUrl(sourceOutput.image_field_meta) ??
+        resolveImageSourceWithPriority(sourceOutput, `output.${incoming.source}`)
+          ?.url ??
+        null;
+    }
+  }
+
+  if (!imageUrl) {
+    for (const node of nodes) {
+      if (node.data.nodeType !== "requestInputs") {
+        continue;
+      }
+
+      const sourceOutput = outputs.get(node.id);
+
+      if (sourceOutput) {
+        imageUrl =
+          normalizeImageInputUrl(sourceOutput.image_field) ??
+          resolveImageSourceWithPriority(sourceOutput, `output.${node.id}`)
+            ?.url ??
+          null;
+      }
+
+      if (!imageUrl) {
+        const fromConfig = getImageFieldFromConfigFields(
+          node.data.config,
+          "image_field",
+        );
+
+        if (fromConfig) {
+          imageUrl = resolveImageFieldForExecution(fromConfig);
+        }
+      }
+
+      if (imageUrl) {
+        break;
+      }
+    }
+  }
 
   return { input_image: imageUrl };
 }
