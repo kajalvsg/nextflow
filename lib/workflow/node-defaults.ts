@@ -1,4 +1,8 @@
-import { normalizeStoredImageUrl, extractStoredImageReference } from "@/lib/upload/image-upload";
+import {
+  extractStoredImageReferenceWithSource,
+  getExecutableImageUrl,
+  normalizeStoredImageUrl,
+} from "@/lib/upload/image-upload";
 import { defaultRequestInputsConfig } from "@/lib/workflow/request-inputs-fields";
 import type {
   CropImageConfig,
@@ -13,6 +17,7 @@ export function defaultImageFieldState(): ImageFieldState {
   return {
     fileName: null,
     fileUrl: null,
+    executionUrl: null,
     mimeType: null,
     size: null,
   };
@@ -22,16 +27,29 @@ export function defaultImageFieldState(): ImageFieldState {
 export function serializeImageFieldState(
   value: Partial<ImageFieldState> & Record<string, unknown>,
 ): ImageFieldState {
-  const reference = extractStoredImageReference(value);
-  const fileUrl = reference ? normalizeStoredImageUrl(reference) : null;
+  const sourced = extractStoredImageReferenceWithSource(value, "imageValue");
+  const fileUrl = sourced?.reference
+    ? normalizeStoredImageUrl(sourced.reference)
+    : null;
 
   if (!fileUrl) {
     return defaultImageFieldState();
   }
 
+  const explicitExecution =
+    typeof value.executionUrl === "string"
+      ? normalizeStoredImageUrl(value.executionUrl)
+      : null;
+
+  const executionUrl =
+    (explicitExecution ? getExecutableImageUrl(explicitExecution) : null) ??
+    getExecutableImageUrl(fileUrl) ??
+    (fileUrl.startsWith("data:image/") ? fileUrl : explicitExecution ?? fileUrl);
+
   return {
     fileName: typeof value.fileName === "string" ? value.fileName : null,
     fileUrl,
+    executionUrl,
     mimeType: typeof value.mimeType === "string" ? value.mimeType : null,
     size: typeof value.size === "number" ? value.size : null,
   };

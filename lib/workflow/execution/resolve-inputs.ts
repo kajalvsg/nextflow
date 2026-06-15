@@ -1,7 +1,11 @@
 import type { Edge, Node } from "reactflow";
 import { normalizeEdgeForResolution } from "@/lib/workflow/execution/edge-handles";
 import { resolveImageInputFromEdge } from "@/lib/workflow/execution/image-input";
-import { resolveImageFieldForExecution, extractStoredImageReference } from "@/lib/upload/image-upload";
+import {
+  resolveExecutableImageReference,
+  resolveImageFieldForExecution,
+} from "@/lib/upload/image-upload";
+import { serializeImageFieldState } from "@/lib/workflow/node-defaults";
 import { normalizeRequestInputsConfig } from "@/lib/workflow/request-inputs-fields";
 import type {
   CropImageConfig,
@@ -11,10 +15,17 @@ import type {
 
 export type NodeOutputMap = Map<string, Record<string, unknown>>;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export function resolveRequestInputsOutput(
   node: Node<WorkflowNodeData>,
 ): Record<string, unknown> {
   const config = normalizeRequestInputsConfig(node.data.config);
+  const configRecord: Record<string, unknown> = isRecord(node.data.config)
+    ? node.data.config
+    : {};
   const output: Record<string, unknown> = {};
 
   for (const field of config.fields) {
@@ -26,10 +37,23 @@ export function resolveRequestInputsOutput(
     const imageValue = field.imageValue;
     const resolved =
       resolveImageFieldForExecution(imageValue) ??
-      extractStoredImageReference(imageValue) ??
-      extractStoredImageReference(field);
+      resolveExecutableImageReference(field, `fields.${field.id}`)?.url ??
+      resolveExecutableImageReference(
+        configRecord[`${field.id}_meta`],
+        `config.${field.id}_meta`,
+      )?.url ??
+      resolveExecutableImageReference(
+        configRecord[field.id],
+        `config.${field.id}`,
+      )?.url;
+
+    const persistedMeta = serializeImageFieldState({
+      ...(imageValue ?? {}),
+      ...(resolved ? { executionUrl: resolved } : {}),
+    });
+
     output[field.id] = resolved;
-    output[`${field.id}_meta`] = imageValue ?? null;
+    output[`${field.id}_meta`] = persistedMeta;
   }
 
   return output;

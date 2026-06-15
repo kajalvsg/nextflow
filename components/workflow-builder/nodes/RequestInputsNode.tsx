@@ -14,9 +14,9 @@ import {
 } from "lucide-react";
 import { type NodeProps, useUpdateNodeInternals } from "reactflow";
 import {
+  buildImageFieldFromUpload,
   getImagePreviewUrl,
   needsImageReupload,
-  normalizeStoredImageUrl,
   uploadWorkflowImage,
   validateWorkflowImageFile,
 } from "@/lib/upload/image-upload";
@@ -140,12 +140,9 @@ function RequestInputFieldRow({
         onProgress: setUploadProgress,
       });
 
-      onImageChange(field.id, {
-        fileName: result.fileName,
-        fileUrl: normalizeStoredImageUrl(result.fileUrl) ?? result.fileUrl,
-        mimeType: result.mimeType ?? file.type ?? null,
-        size: result.size ?? file.size,
-      });
+      const imageValue = await buildImageFieldFromUpload(file, result);
+
+      onImageChange(field.id, imageValue);
 
       resetLocalUploadState();
       setUploadErrorMessage(null);

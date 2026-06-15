@@ -2,7 +2,9 @@ import type { Edge, Node } from "reactflow";
 import {
   extractStoredImageReference,
   getExecutableImageUrl,
+  logImageResolution,
   normalizeStoredImageUrl,
+  resolveExecutableImageReference,
   resolveImageFieldForExecution,
 } from "@/lib/upload/image-upload";
 import {
@@ -23,6 +25,10 @@ export const CROP_OUTPUT_IMAGE_KEYS = [
 
 export const CROP_IMAGE_INPUT_ERROR =
   "Crop Image requires a connected uploaded image.";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function getSourceNodeType(
   nodes: Node<WorkflowNodeData>[],
@@ -96,17 +102,31 @@ export function isValidImageUrl(value: unknown): value is string {
 
 /** Normalize any supported image reference to a fetchable URL or data URL. */
 export function normalizeImageInputUrl(value: unknown): string | null {
-  if (typeof value !== "string") {
+  if (typeof value === "string") {
+    const stored = normalizeStoredImageUrl(value);
+
+    if (!stored) {
+      return null;
+    }
+
+    const executable = getExecutableImageUrl(stored);
+
+    if (executable) {
+      logImageResolution("input", executable);
+      return executable;
+    }
+
+    if (stored.startsWith("data:image/")) {
+      logImageResolution("input", stored);
+      return stored;
+    }
+
     return null;
   }
 
-  const stored = normalizeStoredImageUrl(value);
+  const resolved = resolveExecutableImageReference(value, "input");
 
-  if (!stored) {
-    return null;
-  }
-
-  return getExecutableImageUrl(stored) ?? stored;
+  return resolved?.url ?? null;
 }
 
 function collectImageCandidates(
@@ -134,17 +154,10 @@ function collectImageCandidates(
   const urls: string[] = [];
 
   for (const candidate of candidates) {
-    const reference = extractStoredImageReference(candidate);
+    const normalized = normalizeImageInputUrl(candidate);
 
-    if (!reference) {
-      continue;
-    }
-
-    const executable =
-      getExecutableImageUrl(reference) ?? normalizeImageInputUrl(reference);
-
-    if (executable) {
-      urls.push(executable);
+    if (normalized) {
+      urls.push(normalized);
     }
   }
 
@@ -194,16 +207,81 @@ function readImageFromNodeConfig(
 
   const config = normalizeRequestInputsConfig(node.data.config);
   const field = getRequestInputField(config, sourceHandle);
+  const configRecord: Record<string, unknown> = isRecord(node.data.config)
+    ? node.data.config
+    : {};
+  const dataRecord: Record<string, unknown> = isRecord(node.data)
+    ? (node.data as Record<string, unknown>)
+    : {};
 
-  if (!field || field.type !== "image_field") {
-    return null;
+  const lookupPaths: Array<{ value: unknown; path: string }> = [];
+
+  if (field?.type === "image_field") {
+    lookupPaths.push({
+      value: field.imageValue,
+      path: `fields.${field.id}.imageValue`,
+    });
+    lookupPaths.push({
+      value: field,
+      path: `fields.${field.id}`,
+    });
   }
 
-  return (
-    resolveImageFieldForExecution(field.imageValue) ??
-    extractStoredImageReference(field.imageValue) ??
-    extractStoredImageReference(field)
+  lookupPaths.push(
+    {
+      value: configRecord[sourceHandle],
+      path: `config.${sourceHandle}`,
+    },
+    {
+      value: configRecord[`${sourceHandle}_meta`],
+      path: `config.${sourceHandle}_meta`,
+    },
+    {
+      value: dataRecord[sourceHandle],
+      path: `data.${sourceHandle}`,
+    },
+    {
+      value: dataRecord[`${sourceHandle}_meta`],
+      path: `data.${sourceHandle}_meta`,
+    },
   );
+
+  for (const lookup of lookupPaths) {
+    const fromField = resolveImageFieldForExecution(
+      lookup.value as Parameters<typeof resolveImageFieldForExecution>[0],
+    );
+
+    if (fromField) {
+      return fromField;
+    }
+
+    const resolved = resolveExecutableImageReference(
+      lookup.value,
+      lookup.path,
+    )?.url;
+
+    if (resolved) {
+      return resolved;
+    }
+
+    const reference = extractStoredImageReference(lookup.value);
+
+    if (reference) {
+      const executable = getExecutableImageUrl(reference);
+
+      if (executable) {
+        logImageResolution(lookup.path, executable);
+        return executable;
+      }
+
+      if (reference.startsWith("data:image/")) {
+        logImageResolution(lookup.path, reference);
+        return reference;
+      }
+    }
+  }
+
+  return null;
 }
 
 export function resolveImageValue(

@@ -11,6 +11,8 @@ export type AddableWorkflowNodeType = "cropImage" | "geminiPro";
 export type ImageFieldState = {
   fileName: string | null;
   fileUrl: string | null;
+  /** Absolute URL or data URL for server-side execution; not shown in the canvas UI. */
+  executionUrl?: string | null;
   mimeType: string | null;
   size: number | null;
 };
