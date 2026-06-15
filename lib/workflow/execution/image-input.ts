@@ -1,19 +1,20 @@
 import type { Edge, Node } from "reactflow";
 import {
+  CROP_IMAGE_BLOB_ERROR,
   extractStoredImageReference,
   getExecutableImageUrl,
-  logImageResolution,
   normalizeStoredImageUrl,
-  resolveExecutableImageReference,
+  recordContainsBlobReference,
   resolveImageFieldForExecution,
+  resolveImageSourceWithPriority,
 } from "@/lib/upload/image-upload";
 import {
   getRequestInputField,
   isRequestInputsImageHandle,
   normalizeRequestInputsConfig,
 } from "@/lib/workflow/request-inputs-fields";
+import type { ImageFieldState, WorkflowNodeData } from "@/types/workflow-canvas";
 import type { NodeOutputMap } from "@/lib/workflow/execution/resolve-inputs";
-import type { WorkflowNodeData } from "@/types/workflow-canvas";
 
 export const IMAGE_SOURCE_HANDLES = new Set(["image_field", "output_image"]);
 
@@ -24,7 +25,7 @@ export const CROP_OUTPUT_IMAGE_KEYS = [
 ] as const;
 
 export const CROP_IMAGE_INPUT_ERROR =
-  "Crop Image requires a connected uploaded image.";
+  "Crop Image requires an uploaded image URL.";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -100,8 +101,57 @@ export function isValidImageUrl(value: unknown): value is string {
   return normalizeImageInputUrl(value) !== null;
 }
 
+function resolveCropImageSource(
+  connectedInput: unknown,
+  connectedMeta: unknown,
+  requestInputField: ImageFieldState | null | undefined,
+  pathPrefix: string,
+): string | null {
+  if (recordContainsBlobReference(connectedInput)) {
+    throw new Error(CROP_IMAGE_BLOB_ERROR);
+  }
+
+  if (recordContainsBlobReference(connectedMeta)) {
+    throw new Error(CROP_IMAGE_BLOB_ERROR);
+  }
+
+  if (recordContainsBlobReference(requestInputField)) {
+    throw new Error(CROP_IMAGE_BLOB_ERROR);
+  }
+
+  const fromConnected =
+    resolveImageSourceWithPriority(
+      connectedInput,
+      `${pathPrefix}.connectedInput`,
+    ) ??
+    resolveImageSourceWithPriority(
+      connectedMeta,
+      `${pathPrefix}.connectedInput.meta`,
+    );
+
+  if (fromConnected) {
+    return fromConnected.url;
+  }
+
+  const fromField =
+    resolveImageSourceWithPriority(
+      requestInputField,
+      `${pathPrefix}.requestInputField`,
+    ) ??
+    resolveImageSourceWithPriority(
+      requestInputField?.meta,
+      `${pathPrefix}.requestInputField.meta`,
+    );
+
+  return fromField?.url ?? null;
+}
+
 /** Normalize any supported image reference to a fetchable URL or data URL. */
 export function normalizeImageInputUrl(value: unknown): string | null {
+  if (recordContainsBlobReference(value)) {
+    return null;
+  }
+
   if (typeof value === "string") {
     const stored = normalizeStoredImageUrl(value);
 
@@ -109,59 +159,13 @@ export function normalizeImageInputUrl(value: unknown): string | null {
       return null;
     }
 
-    const executable = getExecutableImageUrl(stored);
-
-    if (executable) {
-      logImageResolution("input", executable);
-      return executable;
-    }
-
-    if (stored.startsWith("data:image/")) {
-      logImageResolution("input", stored);
-      return stored;
-    }
-
-    return null;
+    return (
+      getExecutableImageUrl(stored) ??
+      (stored.startsWith("data:image/") ? stored : null)
+    );
   }
 
-  const resolved = resolveExecutableImageReference(value, "input");
-
-  return resolved?.url ?? null;
-}
-
-function collectImageCandidates(
-  sourceOutput: Record<string, unknown>,
-  sourceHandle: string,
-): string[] {
-  const normalizedHandle =
-    normalizeImageSourceHandle(sourceHandle) ?? sourceHandle;
-  const candidates: unknown[] = [
-    sourceOutput[normalizedHandle],
-    sourceOutput[sourceHandle],
-    sourceOutput.image_field,
-    sourceOutput.imageField,
-    sourceOutput[`${normalizedHandle}_meta`],
-    sourceOutput[`${sourceHandle}_meta`],
-    sourceOutput.image_field_meta,
-  ];
-
-  for (const [key, value] of Object.entries(sourceOutput)) {
-    if (key.endsWith("_meta")) {
-      candidates.push(value);
-    }
-  }
-
-  const urls: string[] = [];
-
-  for (const candidate of candidates) {
-    const normalized = normalizeImageInputUrl(candidate);
-
-    if (normalized) {
-      urls.push(normalized);
-    }
-  }
-
-  return urls;
+  return resolveImageSourceWithPriority(value, "input")?.url ?? null;
 }
 
 export function readCropOutputImage(
@@ -181,6 +185,7 @@ export function readCropOutputImage(
 function readImageFromOutputRecord(
   sourceOutput: Record<string, unknown>,
   sourceHandle: string,
+  requestInputField?: ImageFieldState | null,
 ): string | null {
   const normalizedHandle =
     normalizeImageSourceHandle(sourceHandle) ?? sourceHandle;
@@ -189,15 +194,21 @@ function readImageFromOutputRecord(
     return readCropOutputImage(sourceOutput);
   }
 
-  const candidates = collectImageCandidates(sourceOutput, sourceHandle);
-
-  return candidates[0] ?? null;
+  return resolveCropImageSource(
+    sourceOutput[normalizedHandle] ?? sourceOutput[sourceHandle],
+    sourceOutput[`${normalizedHandle}_meta`] ??
+      sourceOutput[`${sourceHandle}_meta`] ??
+      sourceOutput.image_field_meta,
+    requestInputField,
+    `output.${normalizedHandle}`,
+  );
 }
 
 function readImageFromNodeConfig(
   sourceNodeId: string,
   sourceHandle: string,
   nodes: Node<WorkflowNodeData>[],
+  sourceOutput?: Record<string, unknown>,
 ): string | null {
   const node = nodes.find((item) => item.id === sourceNodeId);
 
@@ -207,78 +218,49 @@ function readImageFromNodeConfig(
 
   const config = normalizeRequestInputsConfig(node.data.config);
   const field = getRequestInputField(config, sourceHandle);
-  const configRecord: Record<string, unknown> = isRecord(node.data.config)
-    ? node.data.config
-    : {};
-  const dataRecord: Record<string, unknown> = isRecord(node.data)
-    ? (node.data as Record<string, unknown>)
-    : {};
+  const requestInputField =
+    field?.type === "image_field" ? field.imageValue : undefined;
 
-  const lookupPaths: Array<{ value: unknown; path: string }> = [];
+  if (sourceOutput) {
+    const fromOutput = readImageFromOutputRecord(
+      sourceOutput,
+      sourceHandle,
+      requestInputField,
+    );
 
-  if (field?.type === "image_field") {
-    lookupPaths.push({
-      value: field.imageValue,
-      path: `fields.${field.id}.imageValue`,
-    });
-    lookupPaths.push({
-      value: field,
-      path: `fields.${field.id}`,
-    });
+    if (fromOutput) {
+      return fromOutput;
+    }
   }
 
-  lookupPaths.push(
-    {
-      value: configRecord[sourceHandle],
-      path: `config.${sourceHandle}`,
-    },
-    {
-      value: configRecord[`${sourceHandle}_meta`],
-      path: `config.${sourceHandle}_meta`,
-    },
-    {
-      value: dataRecord[sourceHandle],
-      path: `data.${sourceHandle}`,
-    },
-    {
-      value: dataRecord[`${sourceHandle}_meta`],
-      path: `data.${sourceHandle}_meta`,
-    },
-  );
-
-  for (const lookup of lookupPaths) {
-    const fromField = resolveImageFieldForExecution(
-      lookup.value as Parameters<typeof resolveImageFieldForExecution>[0],
-    );
+  if (requestInputField) {
+    const fromField = resolveImageFieldForExecution(requestInputField);
 
     if (fromField) {
       return fromField;
     }
+  }
 
-    const resolved = resolveExecutableImageReference(
-      lookup.value,
-      lookup.path,
-    )?.url;
+  const configRecord: Record<string, unknown> = isRecord(node.data.config)
+    ? node.data.config
+    : {};
 
-    if (resolved) {
-      return resolved;
-    }
+  const fromConfigMeta = resolveImageSourceWithPriority(
+    configRecord[`${sourceHandle}_meta`],
+    `config.${sourceHandle}_meta`,
+  )?.url;
 
-    const reference = extractStoredImageReference(lookup.value);
+  if (fromConfigMeta) {
+    return fromConfigMeta;
+  }
 
-    if (reference) {
-      const executable = getExecutableImageUrl(reference);
+  const reference = extractStoredImageReference(configRecord[sourceHandle]);
 
-      if (executable) {
-        logImageResolution(lookup.path, executable);
-        return executable;
-      }
-
-      if (reference.startsWith("data:image/")) {
-        logImageResolution(lookup.path, reference);
-        return reference;
-      }
-    }
+  if (reference) {
+    return (
+      getExecutableImageUrl(reference) ??
+      (reference.startsWith("data:image/") ? reference : null)
+    );
   }
 
   return null;
@@ -303,18 +285,6 @@ export function resolveImageValue(
   const sourceNodeType = getSourceNodeType(nodes, sourceNodeId);
   const sourceOutput = outputs.get(sourceNodeId);
 
-  if (sourceNodeType === "requestInputs") {
-    const fromConfig = readImageFromNodeConfig(
-      sourceNodeId,
-      normalizedHandle,
-      nodes,
-    );
-
-    if (fromConfig) {
-      return fromConfig;
-    }
-  }
-
   if (sourceNodeType === "cropImage") {
     if (!isOutputImageHandle(normalizedHandle)) {
       return null;
@@ -325,6 +295,15 @@ export function resolveImageValue(
     }
 
     return readCropOutputImage(sourceOutput);
+  }
+
+  if (sourceNodeType === "requestInputs") {
+    return readImageFromNodeConfig(
+      sourceNodeId,
+      normalizedHandle,
+      nodes,
+      sourceOutput,
+    );
   }
 
   if (sourceOutput) {
@@ -378,12 +357,20 @@ export function resolveImageInputFromEdge(
 export function assertCropImageInputUrl(
   inputImage: unknown,
 ): asserts inputImage is string {
+  if (recordContainsBlobReference(inputImage)) {
+    throw new Error(CROP_IMAGE_BLOB_ERROR);
+  }
+
   if (!normalizeImageInputUrl(inputImage)) {
     throw new Error(CROP_IMAGE_INPUT_ERROR);
   }
 }
 
 export function requireCropImageInputUrl(inputImage: unknown): string {
+  if (recordContainsBlobReference(inputImage)) {
+    throw new Error(CROP_IMAGE_BLOB_ERROR);
+  }
+
   const normalized = normalizeImageInputUrl(inputImage);
 
   if (!normalized) {

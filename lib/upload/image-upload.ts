@@ -1,6 +1,9 @@
 import { uploadWorkflowImageAction } from "@/actions/workflow-images";
 import { uploadImageViaTransloadit } from "@/lib/upload/transloadit-client";
-import type { ImageFieldState } from "@/types/workflow-canvas";
+import type {
+  ImageExecutionOutput,
+  ImageFieldState,
+} from "@/types/workflow-canvas";
 
 export type ImageUploadResult = {
   fileName: string;
@@ -23,7 +26,31 @@ export type ResolvedImageSourceType =
   | "absoluteUrl"
   | "relativeUrl"
   | "missing"
+  | "blob"
   | "other";
+
+export type CropImageSourceKind =
+  | "dataUrl"
+  | "http"
+  | "relative"
+  | "blob"
+  | "missing";
+
+export const CROP_IMAGE_BLOB_ERROR =
+  "Crop Image cannot use a browser-only blob URL. Re-upload the image and save the workflow.";
+
+const STORED_IMAGE_KEYS = [
+  "dataUrl",
+  "fileUrl",
+  "value",
+  "executionUrl",
+  "url",
+  "previewUrl",
+  "imageUrl",
+  "publicUrl",
+  "image_field",
+  "imageField",
+] as const;
 
 export const ALLOWED_IMAGE_MIME_TYPES = new Set([
   "image/jpeg",
@@ -39,22 +66,6 @@ export const ALLOWED_IMAGE_EXTENSIONS = new Set([
   "webp",
   "gif",
 ]);
-
-/** Max size for embedding a data URL in saved workflow node data. */
-const MAX_DATA_URL_PERSIST_BYTES = 2 * 1024 * 1024;
-
-const STORED_IMAGE_KEYS = [
-  "executionUrl",
-  "fileUrl",
-  "url",
-  "previewUrl",
-  "imageUrl",
-  "publicUrl",
-  "dataUrl",
-  "image_field",
-  "imageField",
-  "value",
-] as const;
 
 export function validateWorkflowImageFile(file: File): string | null {
   if (!ALLOWED_IMAGE_MIME_TYPES.has(file.type)) {
@@ -128,11 +139,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function readTrimmedString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function isBlobReference(value: string): boolean {
+  return value.startsWith("blob:");
+}
+
+function isDataImageReference(value: string): boolean {
+  return value.startsWith("data:image/");
+}
+
+function isHttpReference(value: string): boolean {
+  return (
+    value.startsWith("http://") ||
+    value.startsWith("https://") ||
+    value.startsWith("//")
+  );
+}
+
 export function classifyImageReference(
   reference: string | null | undefined,
 ): ResolvedImageSourceType {
   if (!reference) {
     return "missing";
+  }
+
+  if (reference.startsWith("blob:")) {
+    return "blob";
   }
 
   if (reference.startsWith("data:image/")) {
@@ -150,17 +187,233 @@ export function classifyImageReference(
   return "other";
 }
 
-export function logImageResolution(path: string, reference: string | null): void {
+export function classifyCropImageSource(
+  reference: string | null | undefined,
+): CropImageSourceKind {
   const type = classifyImageReference(reference);
 
-  if (process.env.NODE_ENV === "development") {
-    console.info(`[image-input] ${path} -> ${type}`);
-    return;
+  switch (type) {
+    case "dataUrl":
+      return "dataUrl";
+    case "absoluteUrl":
+      return "http";
+    case "relativeUrl":
+      return "relative";
+    case "blob":
+      return "blob";
+    case "missing":
+      return "missing";
+    default:
+      return "missing";
+  }
+}
+
+export function logCropImageSource(
+  kind: CropImageSourceKind,
+  path: string,
+): void {
+  console.info(`[crop-image] source type: ${kind}, path: ${path}`);
+}
+
+/** Canonical stored reference for workflow asset uploads. */
+export function toWorkflowAssetPath(fileName: string): string {
+  return `/workflow-assets/${fileName}`;
+}
+
+/** Normalize persisted image references to a stable stored form. */
+export function normalizeStoredImageUrl(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== "string") {
+    return null;
   }
 
-  if (type === "missing") {
-    console.info(`[image-input] ${path} -> missing`);
+  const trimmed = value.trim();
+
+  if (!trimmed || trimmed.startsWith("blob:")) {
+    return null;
   }
+
+  if (trimmed.startsWith("data:image/")) {
+    return trimmed;
+  }
+
+  const assetMatch = trimmed.match(/\/workflow-assets\/[^?#]+/);
+
+  if (assetMatch) {
+    return assetMatch[0];
+  }
+
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("//") ||
+    trimmed.startsWith("/workflow-assets/") ||
+    trimmed.startsWith("/")
+  ) {
+    return trimmed;
+  }
+
+  return trimmed;
+}
+
+export function getExecutableImageUrl(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed || trimmed.startsWith("blob:")) {
+    return null;
+  }
+
+  if (trimmed.startsWith("data:image/")) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith("//")) {
+    return `https:${trimmed}`;
+  }
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith("/")) {
+    return `${getAppBaseUrl()}${trimmed}`;
+  }
+
+  return null;
+}
+
+export function recordContainsBlobReference(value: unknown): boolean {
+  if (typeof value === "string") {
+    return value.startsWith("blob:");
+  }
+
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  for (const candidate of Object.values(value)) {
+    if (recordContainsBlobReference(candidate)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function toExecutableReference(
+  raw: string | null | undefined,
+): string | null {
+  const normalized = normalizeStoredImageUrl(raw);
+
+  if (!normalized) {
+    return null;
+  }
+
+  return getExecutableImageUrl(normalized) ?? normalized;
+}
+
+/**
+ * Resolve an image source using the crop execution priority order.
+ */
+export function resolveImageSourceWithPriority(
+  record: unknown,
+  pathPrefix: string,
+): { url: string; kind: CropImageSourceKind; path: string } | null {
+  if (recordContainsBlobReference(record)) {
+    logCropImageSource("blob", `${pathPrefix}.*`);
+    return null;
+  }
+
+  if (typeof record === "string") {
+    const normalized = normalizeStoredImageUrl(record);
+
+    if (!normalized) {
+      logCropImageSource("missing", pathPrefix);
+      return null;
+    }
+
+    const executable = toExecutableReference(normalized);
+
+    if (!executable) {
+      logCropImageSource("missing", pathPrefix);
+      return null;
+    }
+
+    const kind = classifyCropImageSource(executable);
+    logCropImageSource(kind, pathPrefix);
+    return { url: executable, kind, path: pathPrefix };
+  }
+
+  if (!isRecord(record)) {
+    logCropImageSource("missing", pathPrefix);
+    return null;
+  }
+
+  const meta = isRecord(record.meta) ? record.meta : null;
+
+  const checks: Array<{ path: string; raw: string | null }> = [
+    { path: `${pathPrefix}.dataUrl`, raw: readTrimmedString(record.dataUrl) },
+    { path: `${pathPrefix}.fileUrl`, raw: readTrimmedString(record.fileUrl) },
+    {
+      path: `${pathPrefix}.value`,
+      raw: (() => {
+        const value = readTrimmedString(record.value);
+        return value && isDataImageReference(value) ? value : null;
+      })(),
+    },
+    {
+      path: `${pathPrefix}.value`,
+      raw: (() => {
+        const value = readTrimmedString(record.value);
+        return value && isHttpReference(value) ? value : null;
+      })(),
+    },
+    {
+      path: `${pathPrefix}.meta.dataUrl`,
+      raw: meta ? readTrimmedString(meta.dataUrl) : null,
+    },
+    {
+      path: `${pathPrefix}.meta.fileUrl`,
+      raw: meta ? readTrimmedString(meta.fileUrl) : null,
+    },
+    {
+      path: `${pathPrefix}.executionUrl`,
+      raw: readTrimmedString(record.executionUrl),
+    },
+    {
+      path: `${pathPrefix}.value`,
+      raw: (() => {
+        const value = readTrimmedString(record.value);
+        return value && value.startsWith("/") ? value : null;
+      })(),
+    },
+  ];
+
+  for (const check of checks) {
+    if (!check.raw) {
+      continue;
+    }
+
+    const executable = toExecutableReference(check.raw);
+
+    if (!executable) {
+      continue;
+    }
+
+    const kind = classifyCropImageSource(executable);
+    logCropImageSource(kind, check.path);
+    return { url: executable, kind, path: check.path };
+  }
+
+  logCropImageSource("missing", pathPrefix);
+  return null;
 }
 
 /** Pull a stored image reference from strings or nested upload metadata. */
@@ -252,107 +505,25 @@ export function extractStoredImageReference(value: unknown): string | null {
   return extractStoredImageReferenceWithSource(value)?.reference ?? null;
 }
 
-/** Canonical stored reference for workflow asset uploads. */
-export function toWorkflowAssetPath(fileName: string): string {
-  return `/workflow-assets/${fileName}`;
-}
-
-/** Normalize persisted image references to a stable stored form. */
-export function normalizeStoredImageUrl(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-
-  if (!trimmed || trimmed.startsWith("blob:")) {
-    return null;
-  }
-
-  if (trimmed.startsWith("data:image/")) {
-    return trimmed;
-  }
-
-  const assetMatch = trimmed.match(/\/workflow-assets\/[^?#]+/);
-
-  if (assetMatch) {
-    return assetMatch[0];
-  }
-
-  if (
-    trimmed.startsWith("http://") ||
-    trimmed.startsWith("https://") ||
-    trimmed.startsWith("//") ||
-    trimmed.startsWith("/workflow-assets/") ||
-    trimmed.startsWith("/")
-  ) {
-    return trimmed;
-  }
-
-  return trimmed;
-}
-
-export function getExecutableImageUrl(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-
-  if (!trimmed) {
-    return null;
-  }
-
-  if (trimmed.startsWith("data:image/")) {
-    return trimmed;
-  }
-
-  if (trimmed.startsWith("//")) {
-    return `https:${trimmed}`;
-  }
-
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    return trimmed;
-  }
-
-  if (trimmed.startsWith("/")) {
-    return `${getAppBaseUrl()}${trimmed}`;
-  }
-
-  return null;
-}
-
 export function resolveExecutableImageReference(
   value: unknown,
   pathPrefix = "value",
 ): { url: string; path: string; type: ResolvedImageSourceType } | null {
-  const sourced = extractStoredImageReferenceWithSource(value, pathPrefix);
+  const resolved = resolveImageSourceWithPriority(value, pathPrefix);
 
-  if (!sourced) {
-    logImageResolution(pathPrefix, null);
+  if (!resolved) {
     return null;
   }
-
-  const executable =
-    getExecutableImageUrl(sourced.reference) ??
-    (sourced.reference.startsWith("data:image/") ? sourced.reference : null);
-
-  if (!executable) {
-    logImageResolution(sourced.path, sourced.reference);
-    return null;
-  }
-
-  const type = classifyImageReference(executable);
-  logImageResolution(sourced.path, executable);
 
   return {
-    url: executable,
-    path: sourced.path,
-    type,
+    url: resolved.url,
+    path: resolved.path,
+    type:
+      resolved.kind === "http"
+        ? "absoluteUrl"
+        : resolved.kind === "relative"
+          ? "relativeUrl"
+          : resolved.kind,
   };
 }
 
@@ -360,24 +531,63 @@ export function resolveImageFieldForExecution(
   imageValue: ImageFieldState | null | undefined,
 ): string | null {
   return (
-    resolveExecutableImageReference(imageValue, "imageValue")?.url ?? null
+    resolveImageSourceWithPriority(imageValue, "requestInputField")?.url ??
+    resolveImageSourceWithPriority(imageValue?.meta, "requestInputField.meta")
+      ?.url ??
+    null
   );
+}
+
+export function toImageExecutionOutput(
+  state: ImageFieldState,
+): ImageExecutionOutput {
+  const dataUrl =
+    (state.dataUrl && isDataImageReference(state.dataUrl)
+      ? state.dataUrl
+      : null) ??
+    (state.value && isDataImageReference(state.value) ? state.value : null) ??
+    null;
+
+  const fileUrl = state.fileUrl;
+  const value =
+    state.value ??
+    state.executionUrl ??
+    dataUrl ??
+    getExecutableImageUrl(fileUrl) ??
+    fileUrl;
+
+  return {
+    dataUrl,
+    fileUrl,
+    value,
+    meta: {
+      fileUrl,
+      dataUrl,
+    },
+  };
 }
 
 export function getImagePreviewUrl(
   imageValue: ImageFieldState | null | undefined,
 ): string | null {
-  const reference = extractStoredImageReference(imageValue);
+  const preview =
+    imageValue?.dataUrl ??
+    imageValue?.value ??
+    imageValue?.executionUrl ??
+    imageValue?.fileUrl ??
+    imageValue?.meta?.dataUrl ??
+    imageValue?.meta?.fileUrl ??
+    null;
 
-  if (!reference) {
+  if (!preview) {
     return null;
   }
 
-  if (reference.startsWith("blob:") || reference.startsWith("data:image/")) {
-    return reference;
+  if (preview.startsWith("blob:") || preview.startsWith("data:image/")) {
+    return preview;
   }
 
-  return getExecutableImageUrl(reference) ?? reference;
+  return getExecutableImageUrl(preview) ?? preview;
 }
 
 export function isExecutableImageUrl(value: string | null | undefined): boolean {
@@ -409,38 +619,46 @@ export function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
+function isPublicHttpUrl(fileUrl: string): boolean {
+  return (
+    fileUrl.startsWith("http://") ||
+    fileUrl.startsWith("https://") ||
+    fileUrl.startsWith("//")
+  );
+}
+
 /**
- * Build persisted image field state with an execution-ready reference.
- * Relative local uploads also store a data URL when small enough for serverless execution.
+ * Build persisted image field state with server-usable references.
+ * Local/serverless uploads always persist a data URL for Trigger.dev execution.
  */
 export async function buildImageFieldFromUpload(
   file: File,
   result: ImageUploadResult,
 ): Promise<ImageFieldState> {
   const fileUrl = normalizeStoredImageUrl(result.fileUrl) ?? result.fileUrl;
-  let executionUrl = getExecutableImageUrl(fileUrl);
+  let dataUrl: string | null = null;
 
-  const shouldPersistDataUrl =
-    !executionUrl ||
-    fileUrl.startsWith("/workflow-assets/") ||
-    (!isTransloaditConfigured() && fileUrl.startsWith("/"));
-
-  if (shouldPersistDataUrl && file.size <= MAX_DATA_URL_PERSIST_BYTES) {
+  if (!isPublicHttpUrl(fileUrl)) {
     try {
-      executionUrl = await readFileAsDataUrl(file);
+      dataUrl = await readFileAsDataUrl(file);
     } catch {
-      // Fall back to the stored path or absolute URL below.
+      dataUrl = null;
     }
   }
 
-  if (!executionUrl) {
-    executionUrl = getExecutableImageUrl(fileUrl) ?? fileUrl;
-  }
+  const value =
+    dataUrl ?? getExecutableImageUrl(fileUrl) ?? fileUrl;
 
   return {
     fileName: result.fileName,
     fileUrl,
-    executionUrl,
+    dataUrl,
+    value,
+    executionUrl: value,
+    meta: {
+      fileUrl,
+      dataUrl,
+    },
     mimeType: result.mimeType ?? file.type ?? null,
     size: result.size ?? file.size,
   };

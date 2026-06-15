@@ -8,13 +8,31 @@ export type WorkflowNodeType =
 
 export type AddableWorkflowNodeType = "cropImage" | "geminiPro";
 
+export type ImageFieldMeta = {
+  fileUrl: string | null;
+  dataUrl: string | null;
+};
+
 export type ImageFieldState = {
   fileName: string | null;
   fileUrl: string | null;
-  /** Absolute URL or data URL for server-side execution; not shown in the canvas UI. */
+  /** Base64 data URL for server-side execution when local upload is used. */
+  dataUrl?: string | null;
+  /** Primary executable reference (data URL or absolute URL). */
+  value?: string | null;
+  /** @deprecated Use `value` — kept for backward compatibility with saved graphs. */
   executionUrl?: string | null;
+  meta?: ImageFieldMeta;
   mimeType: string | null;
   size: number | null;
+};
+
+/** Shape propagated to downstream nodes and crop execution resolvers. */
+export type ImageExecutionOutput = {
+  dataUrl: string | null;
+  fileUrl: string | null;
+  value: string | null;
+  meta: ImageFieldMeta;
 };
 
 export type RequestInputFieldType = "text_field" | "image_field";

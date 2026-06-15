@@ -2,8 +2,9 @@ import type { Edge, Node } from "reactflow";
 import { normalizeEdgeForResolution } from "@/lib/workflow/execution/edge-handles";
 import { resolveImageInputFromEdge } from "@/lib/workflow/execution/image-input";
 import {
-  resolveExecutableImageReference,
   resolveImageFieldForExecution,
+  resolveImageSourceWithPriority,
+  toImageExecutionOutput,
 } from "@/lib/upload/image-upload";
 import { serializeImageFieldState } from "@/lib/workflow/node-defaults";
 import { normalizeRequestInputsConfig } from "@/lib/workflow/request-inputs-fields";
@@ -35,25 +36,26 @@ export function resolveRequestInputsOutput(
     }
 
     const imageValue = field.imageValue;
+    const persisted = serializeImageFieldState(imageValue ?? {});
+    const imageOutput = toImageExecutionOutput(persisted);
     const resolved =
-      resolveImageFieldForExecution(imageValue) ??
-      resolveExecutableImageReference(field, `fields.${field.id}`)?.url ??
-      resolveExecutableImageReference(
+      imageOutput.value ??
+      resolveImageFieldForExecution(persisted) ??
+      resolveImageSourceWithPriority(
         configRecord[`${field.id}_meta`],
         `config.${field.id}_meta`,
-      )?.url ??
-      resolveExecutableImageReference(
-        configRecord[field.id],
-        `config.${field.id}`,
       )?.url;
 
-    const persistedMeta = serializeImageFieldState({
-      ...(imageValue ?? {}),
-      ...(resolved ? { executionUrl: resolved } : {}),
-    });
+    const executionPayload = {
+      ...imageOutput,
+      ...(resolved ? { value: resolved } : {}),
+    };
 
-    output[field.id] = resolved;
-    output[`${field.id}_meta`] = persistedMeta;
+    output[field.id] = executionPayload;
+    output[`${field.id}_meta`] = {
+      ...persisted,
+      ...executionPayload,
+    };
   }
 
   return output;

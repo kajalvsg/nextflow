@@ -2,6 +2,7 @@ import {
   extractStoredImageReferenceWithSource,
   getExecutableImageUrl,
   normalizeStoredImageUrl,
+  toImageExecutionOutput,
 } from "@/lib/upload/image-upload";
 import { defaultRequestInputsConfig } from "@/lib/workflow/request-inputs-fields";
 import type {
@@ -17,39 +18,103 @@ export function defaultImageFieldState(): ImageFieldState {
   return {
     fileName: null,
     fileUrl: null,
+    dataUrl: null,
+    value: null,
     executionUrl: null,
+    meta: {
+      fileUrl: null,
+      dataUrl: null,
+    },
     mimeType: null,
     size: null,
   };
 }
 
-/** Persist only saved upload metadata; strip UI-only fields from stored graphs. */
+/** Persist server-usable image references; strip UI-only/blob values from stored graphs. */
 export function serializeImageFieldState(
   value: Partial<ImageFieldState> & Record<string, unknown>,
 ): ImageFieldState {
-  const sourced = extractStoredImageReferenceWithSource(value, "imageValue");
-  const fileUrl = sourced?.reference
-    ? normalizeStoredImageUrl(sourced.reference)
-    : null;
-
-  if (!fileUrl) {
+  if (
+    typeof value.fileUrl === "string" &&
+    value.fileUrl.trim().startsWith("blob:")
+  ) {
     return defaultImageFieldState();
   }
 
-  const explicitExecution =
-    typeof value.executionUrl === "string"
-      ? normalizeStoredImageUrl(value.executionUrl)
-      : null;
+  if (
+    typeof value.dataUrl === "string" &&
+    value.dataUrl.trim().startsWith("blob:")
+  ) {
+    return defaultImageFieldState();
+  }
 
-  const executionUrl =
-    (explicitExecution ? getExecutableImageUrl(explicitExecution) : null) ??
+  const dataUrl =
+    typeof value.dataUrl === "string"
+      ? normalizeStoredImageUrl(value.dataUrl)
+      : null;
+  const fileUrlFromField =
+    typeof value.fileUrl === "string"
+      ? normalizeStoredImageUrl(value.fileUrl)
+      : null;
+  const sourced = extractStoredImageReferenceWithSource(value, "imageValue");
+  const sourcedReference = sourced?.reference
+    ? normalizeStoredImageUrl(sourced.reference)
+    : null;
+
+  const fileUrl =
+    fileUrlFromField ??
+    (sourcedReference && !sourcedReference.startsWith("data:image/")
+      ? sourcedReference
+      : null);
+
+  const resolvedDataUrl =
+    dataUrl ??
+    (sourcedReference?.startsWith("data:image/") ? sourcedReference : null) ??
+    (typeof value.value === "string"
+      ? normalizeStoredImageUrl(value.value)
+      : null);
+
+  if (!fileUrl && !resolvedDataUrl) {
+    return defaultImageFieldState();
+  }
+
+  const explicitValue =
+    typeof value.value === "string"
+      ? normalizeStoredImageUrl(value.value)
+      : typeof value.executionUrl === "string"
+        ? normalizeStoredImageUrl(value.executionUrl)
+        : null;
+
+  const valueRef =
+    explicitValue ??
+    resolvedDataUrl ??
     getExecutableImageUrl(fileUrl) ??
-    (fileUrl.startsWith("data:image/") ? fileUrl : explicitExecution ?? fileUrl);
+    fileUrl ??
+    resolvedDataUrl;
+
+  const metaRecord = value.meta;
+  const meta = {
+    fileUrl:
+      (typeof metaRecord === "object" &&
+      metaRecord !== null &&
+      typeof metaRecord.fileUrl === "string"
+        ? normalizeStoredImageUrl(metaRecord.fileUrl)
+        : null) ?? fileUrl,
+    dataUrl:
+      (typeof metaRecord === "object" &&
+      metaRecord !== null &&
+      typeof metaRecord.dataUrl === "string"
+        ? normalizeStoredImageUrl(metaRecord.dataUrl)
+        : null) ?? resolvedDataUrl,
+  };
 
   return {
     fileName: typeof value.fileName === "string" ? value.fileName : null,
     fileUrl,
-    executionUrl,
+    dataUrl: resolvedDataUrl,
+    value: valueRef,
+    executionUrl: valueRef,
+    meta,
     mimeType: typeof value.mimeType === "string" ? value.mimeType : null,
     size: typeof value.size === "number" ? value.size : null,
   };
