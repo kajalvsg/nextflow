@@ -14,7 +14,8 @@
     "db:push:prisma": "prisma db push",
     "db:check": "node scripts/db-check.mjs",
     "db:studio": "prisma studio",
-    "trigger:dev": "node scripts/trigger-dev.mjs"
+    "trigger:dev": "node scripts/trigger-dev.mjs",
+    "trigger:deploy": "npx trigger.dev@4.4.6 deploy"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.4.1",

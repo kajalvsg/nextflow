@@ -154,7 +154,41 @@ export async function getWorkflowRunInlineExecutions(
     return {};
   }
 
+  return mapRunDetailToInlineExecutions(detail);
+}
+
+export function mapRunDetailToInlineExecutions(
+  detail: WorkflowRunDetail,
+): Record<string, NodeInlineExecutionState> {
   return mapSnapshotsToInlineState(mapExecutionsToSnapshots(detail.executions));
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function getWorkflowRunInlineExecutionsWithRetry(
+  runId: string,
+  maxAttempts = 5,
+): Promise<Record<string, NodeInlineExecutionState>> {
+  let last: Record<string, NodeInlineExecutionState> = {};
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    last = await getWorkflowRunInlineExecutions(runId);
+
+    const hasSuccessfulOutput = Object.values(last).some(
+      (execution) =>
+        execution.status === "success" && execution.output != null,
+    );
+
+    if (hasSuccessfulOutput || attempt === maxAttempts) {
+      return last;
+    }
+
+    await wait(300 * attempt);
+  }
+
+  return last;
 }
 
 export async function getLatestWorkflowInlineExecutions(

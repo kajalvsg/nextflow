@@ -213,6 +213,53 @@ export async function markNodeExecutionSkipped(executionId: string) {
   return updated;
 }
 
+export async function resolveWorkflowRunStatus(
+  runId: string,
+  scope: RunScope,
+  options?: { preferFailure?: boolean; hasDemoFallback?: boolean },
+): Promise<RunStatus> {
+  await ensureDbReady();
+
+  const executions = await db.nodeExecution.findMany({
+    where: { runId },
+    select: { status: true },
+  });
+
+  if (executions.length === 0) {
+    return "failed";
+  }
+
+  const statuses = executions.map((execution) => execution.status);
+  const hasSuccess = statuses.some((status) => status === "success");
+  const hasFailed = statuses.some((status) => status === "failed");
+  const hasPending = statuses.some(
+    (status) => status === "pending" || status === "running",
+  );
+  const allSkipped = statuses.every((status) => status === "skipped");
+
+  if (hasPending) {
+    return "running";
+  }
+
+  if (allSkipped || (!hasSuccess && hasFailed)) {
+    return scope === "full" ? "failed" : "partial";
+  }
+
+  if (!hasSuccess) {
+    return scope === "full" ? "failed" : "partial";
+  }
+
+  if (hasFailed || options?.preferFailure) {
+    if (options?.hasDemoFallback) {
+      return "partial";
+    }
+
+    return scope === "full" ? "failed" : "partial";
+  }
+
+  return "success";
+}
+
 export async function finalizeWorkflowRun(
   runId: string,
   status: RunStatus,

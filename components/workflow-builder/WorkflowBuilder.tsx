@@ -24,6 +24,8 @@ import {
   getLatestWorkflowInlineExecutions,
   getWorkflowRunHistory,
   getWorkflowRunInlineExecutions,
+  getWorkflowRunInlineExecutionsWithRetry,
+  mapRunDetailToInlineExecutions,
   startWorkflowRun,
 } from "@/actions/workflow-execution";
 import { saveWorkflowGraph } from "@/actions/workflow-builder";
@@ -1991,8 +1993,8 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
       try {
         const executions = await pollServerAction(
-          "getWorkflowRunInlineExecutions",
-          () => getWorkflowRunInlineExecutions(runId),
+          "getWorkflowRunInlineExecutionsWithRetry",
+          () => getWorkflowRunInlineExecutionsWithRetry(runId),
         );
 
         if (!cancelled) {
@@ -2347,6 +2349,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
               isRunActive={isWorkflowRunning || activeRunId !== null}
               liveRuns={liveRunHistory}
               pollError={runPollError}
+              onApplyRunResults={applyRunResultsToCanvas}
               onClose={() => setHistoryOpen(false)}
             />
           ) : null}

@@ -21,7 +21,8 @@ export type CropImageOutput = {
   height: number;
 };
 
-const MIN_CROP_DURATION_MS = 30_000;
+const MIN_CROP_DURATION_MS =
+  process.env.NODE_ENV === "production" ? 0 : 30_000;
 
 function extractWorkflowAssetFileName(reference: string): string | null {
   const match = reference.match(/\/workflow-assets\/([^?#]+)/);

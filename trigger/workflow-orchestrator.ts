@@ -33,6 +33,7 @@ import {
   markNodeExecutionRunning,
   markNodeExecutionSkipped,
   markNodeExecutionSuccess,
+  resolveWorkflowRunStatus,
   settlePlannedExecutions,
 } from "@/lib/workflow/execution/run-store";
 import { formatPrismaError, logFullError } from "@/lib/db/prisma-error";
@@ -157,6 +158,24 @@ function buildExecutionByNodeId(
   return executionByNodeId;
 }
 
+/** Union payload + persisted execution rows so cloud workers never skip planned nodes. */
+function resolvePlannedNodeIds(
+  payload: WorkflowOrchestratorPayload,
+  runExecutions: Array<{ nodeId: string }>,
+): Set<string> {
+  const ids = new Set<string>();
+
+  for (const nodeId of payload.plannedNodeIds ?? []) {
+    ids.add(nodeId);
+  }
+
+  for (const execution of runExecutions) {
+    ids.add(execution.nodeId);
+  }
+
+  return ids;
+}
+
 export const workflowOrchestratorTask = task({
   id: "workflow-orchestrator",
   retry: {
@@ -223,7 +242,7 @@ export const workflowOrchestratorTask = task({
     const rawImageSources =
       extractRequestInputsImageSourcesFromRawNodes(rawNodes);
 
-    const plannedNodeIds = new Set(payload.plannedNodeIds);
+    const plannedNodeIds = resolvePlannedNodeIds(payload, run.executions);
     const targetNodeIds = new Set(payload.targetNodeIds ?? []);
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
     const executionByNodeId = buildExecutionByNodeId(
@@ -267,6 +286,8 @@ export const workflowOrchestratorTask = task({
     let hasDemoFallback = false;
 
     const markSkippedNodes = async () => {
+      const runExecutionIds = new Set(run.executions.map((execution) => execution.id));
+
       for (const node of nodes) {
         if (plannedNodeIds.has(node.id)) {
           continue;
@@ -274,9 +295,11 @@ export const workflowOrchestratorTask = task({
 
         const execution = executionByNodeId.get(node.id);
 
-        if (execution) {
-          await markNodeExecutionSkipped(execution.id);
+        if (!execution || runExecutionIds.has(execution.id)) {
+          continue;
         }
+
+        await markNodeExecutionSkipped(execution.id);
       }
     };
 
@@ -935,14 +958,11 @@ export const workflowOrchestratorTask = task({
         executionByNodeId,
       );
 
-      const finalStatus: RunStatus =
-        hasFailure && hasDemoFallback
-          ? "partial"
-          : hasFailure
-            ? payload.scope === "full"
-              ? "failed"
-              : "partial"
-            : "success";
+      const finalStatus = await resolveWorkflowRunStatus(
+        payload.runId,
+        payload.scope,
+        { preferFailure: hasFailure, hasDemoFallback },
+      );
 
       await finalizeWorkflowRun(payload.runId, finalStatus, startedAt);
 

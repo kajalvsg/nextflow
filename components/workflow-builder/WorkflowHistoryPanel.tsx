@@ -7,9 +7,11 @@ import {
   getWorkflowRunHistory,
 } from "@/actions/workflow-execution";
 import type {
+  NodeInlineExecutionState,
   WorkflowRunDetail,
   WorkflowRunSummary,
 } from "@/types/workflow-execution";
+import { mapRunDetailToInlineExecutions } from "@/actions/workflow-execution";
 import { pollServerAction } from "@/lib/utils/poll-server-action";
 import { cn } from "@/lib/utils/cn";
 import {
@@ -29,6 +31,10 @@ type WorkflowHistoryPanelProps = {
   isRunActive?: boolean;
   liveRuns?: WorkflowRunSummary[] | null;
   pollError?: string | null;
+  onApplyRunResults?: (
+    executions: Record<string, NodeInlineExecutionState>,
+    source: "history",
+  ) => void;
   onClose?: () => void;
 };
 
@@ -94,6 +100,7 @@ export function WorkflowHistoryPanel({
   isRunActive = false,
   liveRuns = null,
   pollError = null,
+  onApplyRunResults,
   onClose,
 }: WorkflowHistoryPanelProps) {
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
@@ -111,6 +118,27 @@ export function WorkflowHistoryPanel({
   const expandedRunIdRef = useRef<string | null>(null);
   const runsRef = useRef<WorkflowRunSummary[]>([]);
   const pollFailureCountRef = useRef(0);
+  const onApplyRunResultsRef = useRef(onApplyRunResults);
+
+  useEffect(() => {
+    onApplyRunResultsRef.current = onApplyRunResults;
+  }, [onApplyRunResults]);
+
+  const applySuccessfulRunOutputs = (detail: WorkflowRunDetail | null) => {
+    if (!detail || detail.status !== "success") {
+      return;
+    }
+
+    const executions = mapRunDetailToInlineExecutions(detail);
+    const hasOutput = Object.values(executions).some(
+      (execution) =>
+        execution.status === "success" && execution.output != null,
+    );
+
+    if (hasOutput) {
+      onApplyRunResultsRef.current?.(executions, "history");
+    }
+  };
 
   useEffect(() => {
     runsRef.current = runs;
@@ -194,6 +222,18 @@ export function WorkflowHistoryPanel({
         setError(null);
         pollFailureCountRef.current = 0;
 
+        const latestRun = history[0];
+
+        if (latestRun?.status === "success") {
+          const latestDetail = await pollServerAction("getWorkflowRunDetail", () =>
+            getWorkflowRunDetail(latestRun.id),
+          );
+
+          if (!cancelled) {
+            applySuccessfulRunOutputs(latestDetail);
+          }
+        }
+
         const expandedId = expandedRunIdRef.current;
 
         if (expandedId) {
@@ -203,6 +243,7 @@ export function WorkflowHistoryPanel({
 
           if (!cancelled && detail) {
             setExpandedDetail(detail);
+            applySuccessfulRunOutputs(detail);
           }
         }
       } catch (loadError) {
@@ -284,6 +325,7 @@ export function WorkflowHistoryPanel({
     setExpandedRunId(runId);
     const detail = await getWorkflowRunDetail(runId);
     setExpandedDetail(detail);
+    applySuccessfulRunOutputs(detail);
   };
 
   const visibleRuns =
