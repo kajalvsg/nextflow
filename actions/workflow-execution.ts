@@ -25,6 +25,7 @@ import type {
   NodeExecutionSnapshot,
   NodeInlineExecutionState,
   NodeRuntimeStatus,
+  RunStatus,
   RunScope,
   StartRunResult,
   WorkflowRunDetail,
@@ -149,6 +150,41 @@ export async function waitForWorkflowRunOutputs(
 function buildActiveRunStateFromDetail(
   detail: WorkflowRunDetail,
 ): ActiveRunState {
+  const deriveStatusFromExecutions = (): RunStatus => {
+    const statuses = detail.executions.map((execution) => execution.status);
+
+    if (statuses.length === 0) {
+      return "failed";
+    }
+
+    const hasPending = statuses.some(
+      (status) => status === "pending" || status === "running",
+    );
+
+    if (hasPending) {
+      return "running";
+    }
+
+    const allSkipped = statuses.every((status) => status === "skipped");
+    const hasSuccess = statuses.some((status) => status === "success");
+    const hasFailed = statuses.some((status) => status === "failed");
+
+    // All nodes skipped or nothing succeeded.
+    if (allSkipped || (!hasSuccess && hasFailed)) {
+      return detail.scope === "full" ? "failed" : "partial";
+    }
+
+    if (!hasSuccess) {
+      return detail.scope === "full" ? "failed" : "partial";
+    }
+
+    if (hasFailed) {
+      return detail.scope === "full" ? "failed" : "partial";
+    }
+
+    return "success";
+  };
+
   const nodeStatuses: Record<string, NodeRuntimeStatus> = {};
   const activeNodeIds: string[] = [];
 
@@ -165,9 +201,12 @@ function buildActiveRunStateFromDetail(
     }
   }
 
+  const status: RunStatus =
+    detail.status === "running" ? deriveStatusFromExecutions() : detail.status;
+
   return {
     runId: detail.id,
-    status: detail.status,
+    status,
     nodeStatuses,
     activeNodeIds,
     nodeExecutions: mapExecutionsToSnapshots(detail.executions),
