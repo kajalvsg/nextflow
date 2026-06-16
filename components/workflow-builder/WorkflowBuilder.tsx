@@ -23,10 +23,10 @@ import {
   getActiveRunState,
   getLatestWorkflowInlineExecutions,
   getWorkflowRunHistory,
-  hasSuccessfulRunOutputs,
   startWorkflowRun,
   waitForWorkflowRunOutputs,
 } from "@/actions/workflow-execution";
+import { hasSuccessfulRunOutputs } from "@/lib/workflow/execution/run-inline-executions";
 import { saveWorkflowGraph } from "@/actions/workflow-builder";
 import { autoArrangeWorkflowNodes } from "@/lib/workflow/auto-arrange";
 import {

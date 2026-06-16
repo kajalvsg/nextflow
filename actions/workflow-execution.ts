@@ -3,10 +3,20 @@
 import { auth } from "@clerk/nextjs/server";
 import { tasks } from "@trigger.dev/sdk/v3";
 import { z } from "zod";
+import { access } from "node:fs/promises";
+import path from "node:path";
 import { db, ensureDbReady, withFreshLocalRead } from "@/lib/db";
+import { isPgStorageCorruptionError } from "@/lib/db/prisma-error";
+import { resolveProjectRoot } from "@/lib/db/project-root";
 import { parseStoredGraph } from "@/lib/workflow/canvas";
+import { getRunOutputAssetPath } from "@/lib/workflow/execution/compact-run-output";
 import { planExecutionNodeIds } from "@/lib/workflow/execution/dag";
-import { normalizeCropExecutionOutput } from "@/lib/workflow/execution/crop-output-normalize";
+import {
+  hasSuccessfulRunOutputs,
+  mapExecutionsToSnapshots,
+  mapRunDetailToInlineExecutions,
+  mapSnapshotsToInlineState,
+} from "@/lib/workflow/execution/run-inline-executions";
 import { persistExecutionGraphRaw } from "@/lib/workflow/execution/execution-graph";
 import { createWorkflowRunRecord, nodeDisplayName } from "@/lib/workflow/execution/run-store";
 import type { workflowOrchestratorTask } from "@/trigger/workflow-orchestrator";
@@ -46,72 +56,6 @@ function getTriggerConfigError(): string | null {
   }
 
   return null;
-}
-
-function mapExecutionStatusToRuntime(
-  status: NodeExecutionDetail["status"],
-): NodeRuntimeStatus | null {
-  if (status === "running") {
-    return "running";
-  }
-
-  if (status === "success") {
-    return "success";
-  }
-
-  if (status === "failed") {
-    return "failed";
-  }
-
-  return null;
-}
-
-function normalizeExecutionOutput(
-  nodeType: string,
-  output: unknown,
-): unknown {
-  if (nodeType === "cropImage") {
-    return normalizeCropExecutionOutput(output) ?? output;
-  }
-
-  return output;
-}
-
-function mapExecutionsToSnapshots(
-  executions: NodeExecutionDetail[],
-): Record<string, NodeExecutionSnapshot> {
-  const nodeExecutions: Record<string, NodeExecutionSnapshot> = {};
-
-  for (const execution of executions) {
-    const runtimeStatus = mapExecutionStatusToRuntime(execution.status);
-
-    if (!runtimeStatus) {
-      continue;
-    }
-
-    nodeExecutions[execution.nodeId] = {
-      status: runtimeStatus,
-      output: normalizeExecutionOutput(execution.nodeType, execution.output),
-      error: execution.error,
-    };
-  }
-
-  return nodeExecutions;
-}
-
-function mapSnapshotsToInlineState(
-  snapshots: Record<string, NodeExecutionSnapshot>,
-): Record<string, NodeInlineExecutionState> {
-  return Object.fromEntries(
-    Object.entries(snapshots).map(([nodeId, snapshot]) => [
-      nodeId,
-      {
-        status: snapshot.status,
-        output: snapshot.output,
-        error: snapshot.error,
-      },
-    ]),
-  );
 }
 
 function mapRunExecutions(
@@ -157,23 +101,8 @@ export async function getWorkflowRunInlineExecutions(
   return mapRunDetailToInlineExecutions(detail);
 }
 
-export function mapRunDetailToInlineExecutions(
-  detail: WorkflowRunDetail,
-): Record<string, NodeInlineExecutionState> {
-  return mapSnapshotsToInlineState(mapExecutionsToSnapshots(detail.executions));
-}
-
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export function hasSuccessfulRunOutputs(
-  executions: Record<string, NodeInlineExecutionState>,
-): boolean {
-  return Object.values(executions).some(
-    (execution) =>
-      execution.status === "success" && execution.output != null,
-  );
 }
 
 export async function getWorkflowRunInlineExecutionsWithRetry(
@@ -224,25 +153,44 @@ export async function getLatestWorkflowInlineExecutions(
   const userId = await requireUserId();
 
   return withFreshLocalRead(async (client) => {
-    const run = await client.workflowRun.findFirst({
+    const latest = await client.workflowRun.findFirst({
       where: {
         workflowId,
         userId,
         status: { not: "running" },
       },
       orderBy: { startedAt: "desc" },
-      include: {
-        executions: {
-          orderBy: { startedAt: "asc" },
-        },
-      },
+      select: { id: true },
     });
+
+    if (!latest) {
+      return {};
+    }
+
+    const run = await loadWorkflowRunWithExecutions(client, latest.id, userId);
 
     if (!run) {
       return {};
     }
 
-    const executions = mapRunExecutions(run.executions);
+    const executions = await Promise.all(
+      mapRunExecutions(
+        run.executions.map((execution) => ({
+          ...execution,
+          input: execution.input ?? null,
+          output: execution.output ?? null,
+        })),
+      ).map(async (execution) => ({
+        ...execution,
+        output: await hydrateCropOutputFromDisk(
+          execution.id,
+          execution.nodeType,
+          execution.status,
+          execution.output,
+        ),
+      })),
+    );
+
     return mapSnapshotsToInlineState(mapExecutionsToSnapshots(executions));
   });
 }
@@ -394,17 +342,91 @@ export async function getWorkflowRunHistory(
   });
 }
 
-export async function getWorkflowRunDetail(
-  runId: string,
-): Promise<WorkflowRunDetail | null> {
-  const userId = await requireUserId();
+type RunWithExecutions = {
+  id: string;
+  workflowId: string;
+  status: string;
+  scope: string;
+  startedAt: Date;
+  endedAt: Date | null;
+  durationMs: number | null;
+  executions: Array<{
+    id: string;
+    nodeId: string;
+    nodeType: string;
+    status: string;
+    input?: unknown;
+    output?: unknown;
+    error: string | null;
+    startedAt: Date;
+    endedAt: Date | null;
+    durationMs: number | null;
+  }>;
+};
 
-  return withFreshLocalRead(async (client) => {
+async function hydrateCropOutputFromDisk(
+  executionId: string,
+  nodeType: string,
+  status: string,
+  output: unknown,
+): Promise<unknown> {
+  if (output != null || status !== "success" || nodeType !== "cropImage") {
+    return output ?? null;
+  }
+
+  const publicUrl = getRunOutputAssetPath(executionId);
+  const absolutePath = path.join(resolveProjectRoot(), "public", publicUrl);
+
+  try {
+    await access(absolutePath);
+    return {
+      output_image: publicUrl,
+      outputImage: publicUrl,
+      fileUrl: publicUrl,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function loadWorkflowRunWithExecutions(
+  client: typeof db,
+  runId: string,
+  userId: string,
+): Promise<RunWithExecutions | null> {
+  try {
+    return await client.workflowRun.findFirst({
+      where: { id: runId, userId },
+      include: {
+        executions: {
+          orderBy: { startedAt: "asc" },
+        },
+      },
+    });
+  } catch (error) {
+    if (!isPgStorageCorruptionError(error)) {
+      throw error;
+    }
+
+    console.warn(
+      "[workflow-execution] PGlite TOAST corruption while loading run detail — using metadata-only fallback",
+    );
+
     const run = await client.workflowRun.findFirst({
       where: { id: runId, userId },
       include: {
         executions: {
           orderBy: { startedAt: "asc" },
+          select: {
+            id: true,
+            nodeId: true,
+            nodeType: true,
+            status: true,
+            error: true,
+            startedAt: true,
+            endedAt: true,
+            durationMs: true,
+          },
         },
       },
     });
@@ -413,7 +435,71 @@ export async function getWorkflowRunDetail(
       return null;
     }
 
-    const executions = mapRunExecutions(run.executions);
+    const executions = await Promise.all(
+      run.executions.map(async (execution) => {
+        let output: unknown = null;
+
+        try {
+          const row = await client.nodeExecution.findUnique({
+            where: { id: execution.id },
+            select: { output: true },
+          });
+          output = row?.output ?? null;
+        } catch {
+          output = null;
+        }
+
+        output = await hydrateCropOutputFromDisk(
+          execution.id,
+          execution.nodeType,
+          execution.status,
+          output,
+        );
+
+        return {
+          ...execution,
+          input: null,
+          output,
+        };
+      }),
+    );
+
+    return {
+      ...run,
+      executions,
+    };
+  }
+}
+
+export async function getWorkflowRunDetail(
+  runId: string,
+): Promise<WorkflowRunDetail | null> {
+  const userId = await requireUserId();
+
+  return withFreshLocalRead(async (client) => {
+    const run = await loadWorkflowRunWithExecutions(client, runId, userId);
+
+    if (!run) {
+      return null;
+    }
+
+    const executions = await Promise.all(
+      mapRunExecutions(
+        run.executions.map((execution) => ({
+          ...execution,
+          input: execution.input ?? null,
+          output: execution.output ?? null,
+        })),
+      ).map(async (execution) => ({
+        ...execution,
+        output: await hydrateCropOutputFromDisk(
+          execution.id,
+          execution.nodeType,
+          execution.status,
+          execution.output,
+        ),
+      })),
+    );
 
     return {
       id: run.id,

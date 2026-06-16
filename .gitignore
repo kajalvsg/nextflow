@@ -47,5 +47,8 @@ next-env.d.ts
 # local dev database (PGlite)
 /data/
 
+# persisted local run output images (data URLs offloaded from PGlite)
+/public/workflow-assets/run-outputs/
+
 # Trigger.dev build cache
 .trigger/

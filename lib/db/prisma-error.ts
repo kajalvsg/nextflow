@@ -93,3 +93,14 @@ export function formatPrismaError(error: unknown): Error {
     error instanceof Error ? error.message : "Database operation failed.",
   );
 }
+
+export function isPgStorageCorruptionError(error: unknown): boolean {
+  const message = readErrorRecord(error).message?.toLowerCase() ?? "";
+
+  return (
+    message.includes("missing chunk") ||
+    message.includes("pg_toast") ||
+    message.includes("xx001") ||
+    message.includes("could not read block")
+  );
+}

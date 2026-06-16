@@ -11,7 +11,7 @@ import type {
   WorkflowRunDetail,
   WorkflowRunSummary,
 } from "@/types/workflow-execution";
-import { mapRunDetailToInlineExecutions } from "@/actions/workflow-execution";
+import { mapRunDetailToInlineExecutions } from "@/lib/workflow/execution/run-inline-executions";
 import { pollServerAction } from "@/lib/utils/poll-server-action";
 import { cn } from "@/lib/utils/cn";
 import {

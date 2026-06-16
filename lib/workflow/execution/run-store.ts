@@ -3,6 +3,7 @@ import { db, ensureDbReady } from "@/lib/db";
 import { releaseLocalDatabaseAfterWrite } from "@/lib/db/local-pglite";
 import { isLocalDatabaseEnabled } from "@/lib/db/database-mode";
 import { logFullError } from "@/lib/db/prisma-error";
+import { compactExecutionPayloadForStorage } from "@/lib/workflow/execution/compact-run-output";
 import { defaultLabelForNodeType } from "@/lib/workflow/node-defaults";
 import type { RunScope, RunStatus } from "@/types/workflow-execution";
 import type { WorkflowNodeType } from "@/types/workflow-canvas";
@@ -107,13 +108,21 @@ export async function markNodeExecutionSuccess(
   await ensureDbReady();
 
   const endedAt = new Date();
+  const storedInput = await compactExecutionPayloadForStorage(
+    executionId,
+    input,
+  );
+  const storedOutput = await compactExecutionPayloadForStorage(
+    executionId,
+    output,
+  );
 
   const updated = await db.nodeExecution.update({
     where: { id: executionId },
     data: {
       status: "success",
-      input: input as object,
-      output: output as object,
+      input: storedInput as object,
+      output: storedOutput as object,
       endedAt,
       durationMs: endedAt.getTime() - startedAt.getTime(),
     },
