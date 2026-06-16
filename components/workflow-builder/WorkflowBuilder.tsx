@@ -36,7 +36,7 @@ import {
 import { PROTECTED_NODE_IDS, sanitizeGraphForSave } from "@/lib/workflow/canvas";
 import { getEdgeStrokeColor } from "@/lib/workflow/edge-colors";
 import { prepareGraphPayload, serializeGraphPayload } from "@/lib/workflow/graph-payload";
-import { pollServerAction } from "@/lib/utils/poll-server-action";
+import { pollServerAction, HISTORY_POLL_TIMEOUT_MS } from "@/lib/utils/poll-server-action";
 import { applyRunResultsToNodes } from "@/lib/workflow/execution/apply-run-results";
 import {
   buildWorkflowExportDocument,
@@ -131,7 +131,7 @@ const RUN_POLL_INTERVAL_MS = 1500;
 const RUN_STATUS_RESET_MS = 3500;
 const MAX_RUN_POLL_FAILURES = 8;
 const MAX_RUN_WAIT_MS = 180_000;
-const RUN_POLL_SERVER_TIMEOUT_MS = 20_000;
+const RUN_POLL_SERVER_TIMEOUT_MS = 35_000;
 
 function isTerminalRunStatus(status: RunStatus): boolean {
   return status === "success" || status === "failed" || status === "partial";
@@ -312,9 +312,11 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
   const [moveConnectedGroup, setMoveConnectedGroup] = useState(false);
   const [isWorkflowCanvasDragging, setIsWorkflowCanvasDragging] = useState(false);
   const moveConnectedGroupRef = useRef(false);
-  const finishActiveRunRef = useRef<
-    ((state: ActiveRunState) => Promise<void>) | null
-  >(null);
+  const stopRunPollingRef = useRef<(() => void) | null>(null);
+  const pollCancelledRef = useRef(false);
+  const settledRunIdRef = useRef<string | null>(null);
+  const resetRunTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
   const [canRunWorkflow, setCanRunWorkflow] = useState(true);
   const [isLeaving, setIsLeaving] = useState(false);
 
@@ -352,6 +354,14 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
   }, [nodes, edges]);
 
   useEffect(() => {
+    activeRunIdRef.current = activeRunId;
+
+    if (!activeRunId) {
+      settledRunIdRef.current = null;
+    }
+  }, [activeRunId]);
+
+  useEffect(() => {
     moveConnectedGroupRef.current = moveConnectedGroup;
   }, [moveConnectedGroup]);
 
@@ -384,6 +394,13 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     toastTimerRef.current = setTimeout(() => {
       setToastMessage(null);
     }, TOAST_DURATION_MS);
+  }, []);
+
+  const resetRunVisualState = useCallback(() => {
+    setNodeStatuses({});
+    setActiveNodeIds([]);
+    setIsWorkflowRunning(false);
+    setActiveRunId(null);
   }, []);
 
   const markWorkflowUnavailable = useCallback(
@@ -1825,38 +1842,141 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     [applyRunResultsToCanvas],
   );
 
+  const finishActiveRun = useCallback(
+    async (state: ActiveRunState) => {
+      if (settledRunIdRef.current === state.runId) {
+        return;
+      }
+
+      settledRunIdRef.current = state.runId;
+      stopRunPollingRef.current?.();
+
+      const shouldApply = () => activeRunIdRef.current === state.runId;
+
+      setRunPollError(null);
+      setNodeStatuses(state.nodeStatuses);
+      setActiveNodeIds(state.activeNodeIds);
+      applyRunExecutionSnapshots(state.nodeExecutions);
+
+      let outputsApplied = hasSuccessfulRunOutputs(
+        mapSnapshotsToInlineExecutions(state.nodeExecutions),
+      );
+
+      try {
+        const executions = await pollServerAction(
+          "waitForWorkflowRunOutputs",
+          () => waitForWorkflowRunOutputs(state.runId, 45_000),
+          50_000,
+        );
+
+        if (shouldApply()) {
+          applyRunResultsToCanvas(executions, "run-complete");
+          outputsApplied =
+            outputsApplied || hasSuccessfulRunOutputs(executions);
+        }
+      } catch (error) {
+        console.error("[poll] waitForWorkflowRunOutputs failed:", error);
+      }
+
+      if (shouldApply()) {
+        setNodeInlineExecutions((previous) => {
+          const next = { ...previous };
+
+          for (const [nodeId, inline] of Object.entries(next)) {
+            if (inline.status === "updating") {
+              delete next[nodeId];
+            }
+          }
+
+          return next;
+        });
+
+        if (!outputsApplied) {
+          setRunPollError(
+            "Run finished but outputs are still syncing. Check history in a moment.",
+          );
+        } else {
+          setRunPollError(null);
+        }
+      }
+
+      try {
+        const history = await pollServerAction(
+          "getWorkflowRunHistory",
+          () => getWorkflowRunHistory(workflowId),
+          HISTORY_POLL_TIMEOUT_MS,
+        );
+
+        if (shouldApply()) {
+          setLiveRunHistory(history);
+        }
+      } catch (error) {
+        console.error("[poll] refreshHistory failed:", error);
+      }
+
+      if (shouldApply()) {
+        setHistoryRefreshKey((current) => current + 1);
+      }
+
+      if (!shouldApply()) {
+        return;
+      }
+
+      setIsWorkflowRunning(false);
+
+      if (state.status === "success") {
+        showToast("Workflow run completed.");
+      } else if (state.status === "failed") {
+        showToast("Workflow run failed.");
+      } else {
+        showToast("Workflow run finished with partial success.");
+      }
+
+      if (resetRunTimerRef.current) {
+        clearTimeout(resetRunTimerRef.current);
+      }
+
+      resetRunTimerRef.current = setTimeout(() => {
+        if (activeRunIdRef.current === state.runId) {
+          resetRunVisualState();
+          setLiveRunHistory(null);
+        }
+      }, RUN_STATUS_RESET_MS);
+    },
+    [
+      applyRunExecutionSnapshots,
+      applyRunResultsToCanvas,
+      resetRunVisualState,
+      showToast,
+      workflowId,
+    ],
+  );
+
   const handleActiveRunSettledFromHistory = useCallback(
     async (runId: string, status: RunStatus) => {
-      if (activeRunId !== runId || !finishActiveRunRef.current) {
+      if (activeRunId !== runId || settledRunIdRef.current === runId) {
         return;
       }
 
       try {
-        const state = await pollServerAction(
+        const runState = await pollServerAction(
           "pollActiveWorkflowRun",
           () => pollActiveWorkflowRun(runId),
           RUN_POLL_SERVER_TIMEOUT_MS,
         );
 
-        if (state) {
-          await finishActiveRunRef.current({
-            ...state,
-            status: isTerminalRunStatus(status) ? status : state.status,
+        if (runState) {
+          await finishActiveRun({
+            ...runState,
+            status: isTerminalRunStatus(status) ? status : runState.status,
           });
         }
       } catch (error) {
         console.error("[history] active run settle failed:", error);
       }
     },
-    [activeRunId],
+    [activeRunId, finishActiveRun],
   );
-
-  const resetRunVisualState = useCallback(() => {
-    setNodeStatuses({});
-    setActiveNodeIds([]);
-    setIsWorkflowRunning(false);
-    setActiveRunId(null);
-  }, []);
 
   const handleRun = useCallback(async () => {
     if (isWorkflowRunning) {
@@ -1970,11 +2090,12 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
   useEffect(() => {
     if (!activeRunId) {
+      pollCancelledRef.current = false;
       return;
     }
 
-    let cancelled = false;
-    let resetTimer: ReturnType<typeof setTimeout> | null = null;
+    pollCancelledRef.current = false;
+
     let interval: ReturnType<typeof setInterval> | null = null;
     let pollFailureCount = 0;
     let pollInFlight = false;
@@ -1987,6 +2108,8 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
         interval = null;
       }
     };
+
+    stopRunPollingRef.current = stopPolling;
 
     const clearUpdatingStates = () => {
       setNodeInlineExecutions((previous) => {
@@ -2002,89 +2125,6 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       });
     };
 
-    const refreshHistory = async () => {
-      const history = await pollServerAction("getWorkflowRunHistory", () =>
-        getWorkflowRunHistory(workflowId),
-      );
-
-      if (!cancelled) {
-        setLiveRunHistory(history);
-      }
-
-      return history;
-    };
-
-    const finishActiveRun = async (state: ActiveRunState) => {
-      stopPolling();
-      setRunPollError(null);
-      setNodeStatuses(state.nodeStatuses);
-      setActiveNodeIds(state.activeNodeIds);
-      applyRunExecutionSnapshots(state.nodeExecutions);
-
-      let outputsApplied = hasSuccessfulRunOutputs(
-        mapSnapshotsToInlineExecutions(state.nodeExecutions),
-      );
-
-      try {
-        const executions = await pollServerAction(
-          "waitForWorkflowRunOutputs",
-          () => waitForWorkflowRunOutputs(runId, 45_000),
-          50_000,
-        );
-
-        if (!cancelled) {
-          applyRunResultsToCanvas(executions, "run-complete");
-          outputsApplied =
-            outputsApplied || hasSuccessfulRunOutputs(executions);
-        }
-      } catch (error) {
-        console.error("[poll] waitForWorkflowRunOutputs failed:", error);
-      }
-
-      if (!cancelled) {
-        clearUpdatingStates();
-
-        if (!outputsApplied) {
-          setRunPollError(
-            "Run finished but outputs are still syncing. Check history in a moment.",
-          );
-        } else {
-          setRunPollError(null);
-        }
-      }
-
-      await refreshHistory().catch((error) => {
-        console.error("[poll] refreshHistory failed:", error);
-      });
-
-      if (!cancelled) {
-        setHistoryRefreshKey((current) => current + 1);
-      }
-
-      if (cancelled) {
-        return;
-      }
-
-      setIsWorkflowRunning(false);
-
-      if (state.status === "success") {
-        showToast("Workflow run completed.");
-      } else if (state.status === "failed") {
-        showToast("Workflow run failed.");
-      } else {
-        showToast("Workflow run finished with partial success.");
-      }
-
-      resetTimer = setTimeout(() => {
-        if (!cancelled) {
-          resetRunVisualState();
-          setLiveRunHistory(null);
-        }
-      }, RUN_STATUS_RESET_MS);
-    };
-
-    finishActiveRunRef.current = finishActiveRun;
-
     const resolveActiveRunState = async (): Promise<ActiveRunState | null> =>
       pollServerAction(
         "pollActiveWorkflowRun",
@@ -2092,22 +2132,35 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
         RUN_POLL_SERVER_TIMEOUT_MS,
       );
 
+    const refreshHistory = async () => {
+      const history = await pollServerAction(
+        "getWorkflowRunHistory",
+        () => getWorkflowRunHistory(workflowId),
+        HISTORY_POLL_TIMEOUT_MS,
+      );
+
+      if (!pollCancelledRef.current) {
+        setLiveRunHistory(history);
+      }
+
+      return history;
+    };
+
     const poll = async () => {
-      if (cancelled || pollInFlight) {
+      if (pollCancelledRef.current || pollInFlight) {
         return;
       }
 
       pollInFlight = true;
 
       try {
-        const [state, history] = await Promise.all([
-          resolveActiveRunState(),
-          refreshHistory().catch(() => null),
-        ]);
+        const state = await resolveActiveRunState();
 
-        if (cancelled) {
+        if (pollCancelledRef.current) {
           return;
         }
+
+        const history = await refreshHistory().catch(() => null);
 
         if (!state) {
           const historySummary = history?.find((run) => run.id === runId);
@@ -2122,7 +2175,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
               status: historySummary.status,
               nodeStatuses: {},
               activeNodeIds: [],
-              nodeExecutions: [],
+              nodeExecutions: {},
             });
             return;
           }
@@ -2168,7 +2221,10 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
             return;
           }
 
-          applyRunExecutionSnapshots(state.nodeExecutions);
+          if (Object.keys(state.nodeExecutions).length > 0) {
+            applyRunExecutionSnapshots(state.nodeExecutions);
+          }
+
           return;
         }
 
@@ -2202,18 +2258,19 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     }, RUN_POLL_INTERVAL_MS);
 
     return () => {
-      cancelled = true;
-      finishActiveRunRef.current = null;
+      pollCancelledRef.current = true;
+      stopRunPollingRef.current = null;
       stopPolling();
 
-      if (resetTimer) {
-        clearTimeout(resetTimer);
+      if (resetRunTimerRef.current) {
+        clearTimeout(resetRunTimerRef.current);
+        resetRunTimerRef.current = null;
       }
     };
   }, [
     activeRunId,
-    applyRunResultsToCanvas,
     applyRunExecutionSnapshots,
+    finishActiveRun,
     resetRunVisualState,
     showToast,
     workflowId,

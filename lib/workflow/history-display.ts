@@ -1,5 +1,6 @@
 import type { NodeExecutionDetail } from "@/types/workflow-execution";
 import type { RunScope, RunStatus } from "@/types/workflow-execution";
+import { resolveRunOutputDisplayUrl } from "@/lib/workflow/execution/run-output-url";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -157,7 +158,12 @@ export function getCropImageHistoryUrl(output: unknown): string | null {
   }
 
   const url = output.output_image.trim();
-  return url.length > 0 ? url : null;
+
+  if (!url) {
+    return null;
+  }
+
+  return resolveRunOutputDisplayUrl(url) ?? url;
 }
 
 function extractResponseText(output: unknown): string | null {

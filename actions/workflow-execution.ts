@@ -4,12 +4,11 @@ import { auth } from "@clerk/nextjs/server";
 import { tasks } from "@trigger.dev/sdk/v3";
 import { z } from "zod";
 import { access } from "node:fs/promises";
-import path from "node:path";
 import { db, ensureDbReady, withFreshLocalRead } from "@/lib/db";
 import { isPgStorageCorruptionError } from "@/lib/db/prisma-error";
-import { resolveProjectRoot } from "@/lib/db/project-root";
 import { parseStoredGraph } from "@/lib/workflow/canvas";
-import { getRunOutputAssetPath } from "@/lib/workflow/execution/compact-run-output";
+import { getRunOutputAssetPath, getRunOutputFilePath } from "@/lib/workflow/execution/compact-run-output";
+import { resolveRunOutputDisplayUrl } from "@/lib/workflow/execution/run-output-url";
 import { planExecutionNodeIds } from "@/lib/workflow/execution/dag";
 import {
   hasSuccessfulRunOutputs,
@@ -197,7 +196,7 @@ async function fetchWorkflowRunStatus(
  */
 export async function pollActiveWorkflowRun(
   runId: string,
-  maxWaitMs = 12_000,
+  maxWaitMs = 8_000,
 ): Promise<ActiveRunState | null> {
   const startedAt = Date.now();
   let attempt = 0;
@@ -215,11 +214,21 @@ export async function pollActiveWorkflowRun(
       break;
     }
 
-    if (attempt >= 8) {
+    if (attempt >= 6) {
       break;
     }
 
-    await wait(Math.min(400 * attempt, 1_500));
+    await wait(Math.min(400 * attempt, 1_200));
+  }
+
+  if (lastStatus === "running") {
+    return {
+      runId,
+      status: "running",
+      nodeStatuses: {},
+      activeNodeIds: [],
+      nodeExecutions: {},
+    };
   }
 
   const detail = await getWorkflowRunDetail(runId);
@@ -454,23 +463,70 @@ async function hydrateCropOutputFromDisk(
   status: string,
   output: unknown,
 ): Promise<unknown> {
-  if (output != null || status !== "success" || nodeType !== "cropImage") {
+  if (status !== "success" || nodeType !== "cropImage") {
     return output ?? null;
   }
 
-  const publicUrl = getRunOutputAssetPath(executionId);
-  const absolutePath = path.join(resolveProjectRoot(), "public", publicUrl);
+  let fileExists = false;
 
   try {
-    await access(absolutePath);
-    return {
-      output_image: publicUrl,
-      outputImage: publicUrl,
-      fileUrl: publicUrl,
-    };
+    await access(getRunOutputFilePath(executionId));
+    fileExists = true;
   } catch {
-    return null;
+    fileExists = false;
   }
+
+  const apiUrl = getRunOutputAssetPath(executionId);
+
+  if (fileExists && (output == null || !hasCropOutputReference(output))) {
+    return {
+      ...(isRecord(output) ? output : {}),
+      output_image: apiUrl,
+      outputImage: apiUrl,
+      fileUrl: apiUrl,
+    };
+  }
+
+  if (!isRecord(output)) {
+    return output ?? null;
+  }
+
+  const outputImage =
+    typeof output.output_image === "string" ? output.output_image : null;
+  const displayUrl = outputImage
+    ? resolveRunOutputDisplayUrl(outputImage)
+    : null;
+
+  if (displayUrl && displayUrl !== outputImage) {
+    return {
+      ...output,
+      output_image: displayUrl,
+      outputImage: displayUrl,
+      fileUrl: displayUrl,
+    };
+  }
+
+  return output;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasCropOutputReference(output: unknown): boolean {
+  if (!isRecord(output)) {
+    return false;
+  }
+
+  for (const key of ["output_image", "outputImage", "fileUrl", "dataUrl"]) {
+    const value = output[key];
+
+    if (typeof value === "string" && value.trim().length > 0) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 async function loadWorkflowRunWithExecutions(

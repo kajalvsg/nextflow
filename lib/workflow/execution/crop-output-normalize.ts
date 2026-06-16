@@ -1,4 +1,5 @@
-import { getExecutableImageUrl } from "@/lib/upload/image-upload";
+import { getDisplayImageUrl } from "@/lib/upload/image-upload";
+import { resolveRunOutputDisplayUrl } from "@/lib/workflow/execution/run-output-url";
 import { CROP_OUTPUT_IMAGE_KEYS } from "@/lib/workflow/execution/image-input";
 
 export type CropExecutionOutput = {
@@ -53,17 +54,21 @@ export function normalizeCropExecutionOutput(
     return null;
   }
 
-  const executableUrl = getExecutableImageUrl(imageUrl) ?? imageUrl;
+  const displayUrl =
+    resolveRunOutputDisplayUrl(imageUrl) ??
+    getDisplayImageUrl(imageUrl) ??
+    imageUrl;
 
   return {
-    output_image: executableUrl,
-    outputImage: executableUrl,
-    dataUrl: executableUrl.startsWith("data:") ? executableUrl : null,
+    output_image: displayUrl,
+    outputImage: displayUrl,
+    dataUrl: displayUrl.startsWith("data:") ? displayUrl : null,
     fileUrl:
-      executableUrl.startsWith("http://") ||
-      executableUrl.startsWith("https://") ||
-      executableUrl.startsWith("/workflow-assets/")
-        ? executableUrl
+      displayUrl.startsWith("http://") ||
+      displayUrl.startsWith("https://") ||
+      displayUrl.startsWith("/workflow-assets/") ||
+      displayUrl.startsWith("/api/run-outputs/")
+        ? displayUrl
         : null,
     width: typeof output.width === "number" ? output.width : null,
     height: typeof output.height === "number" ? output.height : null,

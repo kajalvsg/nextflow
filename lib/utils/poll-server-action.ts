@@ -1,6 +1,8 @@
 import { withTimeout } from "@/lib/utils/with-timeout";
 
 const DEFAULT_POLL_TIMEOUT_MS = 15_000;
+export const HISTORY_POLL_TIMEOUT_MS = 30_000;
+export const RUN_POLL_TIMEOUT_MS = 25_000;
 
 export async function pollServerAction<T>(
   label: string,

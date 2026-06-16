@@ -1,4 +1,5 @@
-import { getExecutableImageUrl } from "@/lib/upload/image-upload";
+import { getDisplayImageUrl } from "@/lib/upload/image-upload";
+import { resolveRunOutputDisplayUrl } from "@/lib/workflow/execution/run-output-url";
 import { normalizeCropExecutionOutput } from "@/lib/workflow/execution/crop-output-normalize";
 
 export { normalizeCropExecutionOutput } from "@/lib/workflow/execution/crop-output-normalize";
@@ -19,9 +20,14 @@ function getImageSource(value: unknown): string | null {
     trimmed.startsWith("data:image/") ||
     trimmed.startsWith("http://") ||
     trimmed.startsWith("https://") ||
-    trimmed.startsWith("/workflow-assets/")
+    trimmed.startsWith("/workflow-assets/") ||
+    trimmed.startsWith("/api/run-outputs/")
   ) {
-    return getExecutableImageUrl(trimmed) ?? trimmed;
+    return (
+      resolveRunOutputDisplayUrl(trimmed) ??
+      getDisplayImageUrl(trimmed) ??
+      trimmed
+    );
   }
 
   return null;

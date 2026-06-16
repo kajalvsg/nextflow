@@ -135,6 +135,39 @@ function getAppBaseUrl(): string {
   return "http://localhost:3000";
 }
 
+/** Browser image URL; keeps same-origin asset paths relative. */
+export function getDisplayImageUrl(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed || trimmed.startsWith("blob:")) {
+    return null;
+  }
+
+  if (trimmed.startsWith("data:image/")) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith("//")) {
+    return `https:${trimmed}`;
+  }
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith("/")) {
+    return trimmed;
+  }
+
+  return null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -286,6 +319,10 @@ export function getExecutableImageUrl(
   }
 
   if (trimmed.startsWith("/")) {
+    if (trimmed.startsWith("/api/run-outputs/")) {
+      return `${getAppBaseUrl()}${trimmed}`;
+    }
+
     return `${getAppBaseUrl()}${trimmed}`;
   }
 

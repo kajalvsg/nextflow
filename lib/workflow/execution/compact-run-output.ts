@@ -3,7 +3,11 @@ import "server-only";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveProjectRoot } from "@/lib/db/project-root";
-import { isLocalDatabaseEnabled } from "@/lib/db/database-mode";
+import { resolveDatabaseBackend } from "@/lib/db/database-mode";
+import {
+  getRunOutputFileName,
+  getRunOutputPublicUrl,
+} from "@/lib/workflow/execution/run-output-url";
 
 const MAX_INLINE_DATA_URL_CHARS = 8_000;
 
@@ -60,10 +64,21 @@ async function persistDataUrlToWorkflowAsset(
 
   await mkdir(directory, { recursive: true });
 
-  const fileName = `${executionId}${suffix}.jpg`;
-  await writeFile(path.join(directory, fileName), Buffer.from(base64, "base64"));
+  const fileName = getRunOutputFileName(executionId, suffix);
+  const absolutePath = path.join(directory, fileName);
+  await writeFile(absolutePath, Buffer.from(base64, "base64"));
 
-  return `/workflow-assets/run-outputs/${fileName}`;
+  return getRunOutputPublicUrl(executionId);
+}
+
+export function getRunOutputFilePath(executionId: string, suffix = ""): string {
+  return path.join(
+    resolveProjectRoot(),
+    "public",
+    "workflow-assets",
+    "run-outputs",
+    getRunOutputFileName(executionId, suffix),
+  );
 }
 
 /**
@@ -74,7 +89,9 @@ export async function compactExecutionPayloadForStorage(
   executionId: string,
   payload: unknown,
 ): Promise<unknown> {
-  if (!isLocalDatabaseEnabled() || !isRecord(payload)) {
+  const databaseBackend = await resolveDatabaseBackend();
+
+  if (databaseBackend !== "local" || !isRecord(payload)) {
     return payload;
   }
 
@@ -117,5 +134,5 @@ export async function compactExecutionPayloadForStorage(
 }
 
 export function getRunOutputAssetPath(executionId: string): string {
-  return `/workflow-assets/run-outputs/${executionId}.jpg`;
+  return getRunOutputPublicUrl(executionId);
 }

@@ -58,6 +58,14 @@ export function isLocalDatabaseEnabled(): boolean {
     return resolvedUseLocal;
   }
 
+  if (
+    process.env.NODE_ENV !== "production" &&
+    isExplicitLocalDatabaseRequested() &&
+    !isRemoteDatabaseForced()
+  ) {
+    return true;
+  }
+
   if (!hasPostgresDatabaseUrl()) {
     return isExplicitLocalDatabaseRequested();
   }

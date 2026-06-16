@@ -1,7 +1,7 @@
 import type { NodeExecution } from "@prisma/client";
 import { db, ensureDbReady } from "@/lib/db";
+import { resolveDatabaseBackend } from "@/lib/db/database-mode";
 import { releaseLocalDatabaseAfterWrite } from "@/lib/db/local-pglite";
-import { isLocalDatabaseEnabled } from "@/lib/db/database-mode";
 import { logFullError } from "@/lib/db/prisma-error";
 import { compactExecutionPayloadForStorage } from "@/lib/workflow/execution/compact-run-output";
 import { defaultLabelForNodeType } from "@/lib/workflow/node-defaults";
@@ -13,7 +13,9 @@ function logRunStore(message: string): void {
 }
 
 async function publishLocalRunState(): Promise<void> {
-  if (!isLocalDatabaseEnabled()) {
+  const backend = await resolveDatabaseBackend();
+
+  if (backend !== "local") {
     return;
   }
 

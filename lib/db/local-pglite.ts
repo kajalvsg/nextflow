@@ -240,7 +240,10 @@ export async function reopenLocalDatabaseConnection(): Promise<void> {
  * Trigger.dev) can open the on-disk database and see committed rows.
  */
 export async function releaseLocalDatabaseAfterWrite(): Promise<void> {
-  if (!isLocalDatabaseEnabled()) {
+  const { resolveDatabaseBackend } = await import("@/lib/db/database-mode");
+  const backend = await resolveDatabaseBackend();
+
+  if (backend !== "local") {
     return;
   }
 

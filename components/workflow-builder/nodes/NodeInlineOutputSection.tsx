@@ -1,7 +1,8 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { getExecutableImageUrl } from "@/lib/upload/image-upload";
+import { getDisplayImageUrl } from "@/lib/upload/image-upload";
+import { resolveRunOutputDisplayUrl } from "@/lib/workflow/execution/run-output-url";
 import { cn } from "@/lib/utils/cn";
 import type { NodeInlineExecutionState } from "@/types/workflow-execution";
 
@@ -31,9 +32,14 @@ function getImageSource(value: unknown): string | null {
     trimmed.startsWith("data:image/") ||
     trimmed.startsWith("http://") ||
     trimmed.startsWith("https://") ||
-    trimmed.startsWith("/workflow-assets/")
+    trimmed.startsWith("/workflow-assets/") ||
+    trimmed.startsWith("/api/run-outputs/")
   ) {
-    return getExecutableImageUrl(trimmed) ?? trimmed;
+    return (
+      resolveRunOutputDisplayUrl(trimmed) ??
+      getDisplayImageUrl(trimmed) ??
+      trimmed
+    );
   }
 
   return null;

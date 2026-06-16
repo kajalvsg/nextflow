@@ -13,7 +13,7 @@ import type {
   WorkflowRunSummary,
 } from "@/types/workflow-execution";
 import { mapRunDetailToInlineExecutions } from "@/lib/workflow/execution/run-inline-executions";
-import { pollServerAction } from "@/lib/utils/poll-server-action";
+import { pollServerAction, HISTORY_POLL_TIMEOUT_MS } from "@/lib/utils/poll-server-action";
 import { cn } from "@/lib/utils/cn";
 import {
   WorkflowHistoryRunDetails,
@@ -189,8 +189,10 @@ export function WorkflowHistoryPanel({
     setError(null);
     hasLoadedRef.current = false;
 
-    void pollServerAction("getWorkflowRunHistory", () =>
-      getWorkflowRunHistory(workflowId),
+    void pollServerAction(
+      "getWorkflowRunHistory",
+      () => getWorkflowRunHistory(workflowId),
+      HISTORY_POLL_TIMEOUT_MS,
     )
       .then((history) => {
         if (!cancelled) {
@@ -216,6 +218,10 @@ export function WorkflowHistoryPanel({
   }, [workflowId]);
 
   useEffect(() => {
+    if (liveRuns != null) {
+      return;
+    }
+
     let cancelled = false;
     let refreshInFlight = false;
     let interval: ReturnType<typeof setInterval> | null = null;
@@ -237,8 +243,10 @@ export function WorkflowHistoryPanel({
       refreshInFlight = true;
 
       try {
-        const history = await pollServerAction("getWorkflowRunHistory", () =>
-          getWorkflowRunHistory(workflowId),
+        const history = await pollServerAction(
+          "getWorkflowRunHistory",
+          () => getWorkflowRunHistory(workflowId),
+          HISTORY_POLL_TIMEOUT_MS,
         );
 
         if (cancelled) {
@@ -301,7 +309,7 @@ export function WorkflowHistoryPanel({
         clearInterval(interval);
       }
     };
-  }, [workflowId, activeRunId, isRunActive, refreshKey]);
+  }, [workflowId, activeRunId, isRunActive, refreshKey, liveRuns]);
 
   useEffect(() => {
     if (refreshKey === 0 || !hasLoadedRef.current) {
@@ -310,8 +318,10 @@ export function WorkflowHistoryPanel({
 
     let cancelled = false;
 
-    void pollServerAction("getWorkflowRunHistory", () =>
-      getWorkflowRunHistory(workflowId),
+    void pollServerAction(
+      "getWorkflowRunHistory",
+      () => getWorkflowRunHistory(workflowId),
+      HISTORY_POLL_TIMEOUT_MS,
     )
       .then((history) => {
         if (!cancelled) {

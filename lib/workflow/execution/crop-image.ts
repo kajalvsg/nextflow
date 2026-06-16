@@ -2,10 +2,12 @@ import { readFile } from "fs/promises";
 import path from "path";
 import sharp from "sharp";
 import { resolveProjectRoot } from "@/lib/db/project-root";
+import { getRunOutputFilePath } from "@/lib/workflow/execution/compact-run-output";
 import {
   normalizeImageInputUrl,
   requireCropImageInputUrl,
 } from "@/lib/workflow/execution/image-input";
+import { parseRunOutputExecutionId } from "@/lib/workflow/execution/run-output-url";
 
 export type CropImageInput = {
   input_image?: string | null;
@@ -21,8 +23,7 @@ export type CropImageOutput = {
   height: number;
 };
 
-const MIN_CROP_DURATION_MS =
-  process.env.NODE_ENV === "production" ? 0 : 30_000;
+const MIN_CROP_DURATION_MS = 0;
 
 function extractWorkflowAssetFileName(reference: string): string | null {
   const match = reference.match(/\/workflow-assets\/([^?#]+)/);
@@ -41,6 +42,20 @@ async function readLocalWorkflowAsset(reference: string): Promise<Buffer | null>
     return await readFile(
       path.join(resolveProjectRoot(), "public", "workflow-assets", assetFileName),
     );
+  } catch {
+    return null;
+  }
+}
+
+async function readLocalRunOutput(reference: string): Promise<Buffer | null> {
+  const executionId = parseRunOutputExecutionId(reference);
+
+  if (!executionId) {
+    return null;
+  }
+
+  try {
+    return await readFile(getRunOutputFilePath(executionId));
   } catch {
     return null;
   }
@@ -67,6 +82,12 @@ async function loadImageBuffer(inputImage: string): Promise<Buffer> {
 
   if (localAsset) {
     return localAsset;
+  }
+
+  const localRunOutput = await readLocalRunOutput(trimmed);
+
+  if (localRunOutput) {
+    return localRunOutput;
   }
 
   const fetchUrl = normalizeImageInputUrl(trimmed) ?? trimmed;
