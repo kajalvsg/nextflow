@@ -3,6 +3,7 @@ import "server-only";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { logFullError } from "@/lib/db/prisma-error";
 import { resolveProjectRoot } from "@/lib/db/project-root";
 import { isLocalDatabaseEnabled } from "@/lib/db/database-mode";
 
@@ -101,6 +102,7 @@ async function createFreshPgliteInstance(localDbPath: string): Promise<PGlite> {
         attempt < OPEN_MAX_ATTEMPTS && isRetryableOpenError(error);
 
       if (shouldRetry) {
+        logFullError(`local-pglite open attempt ${attempt}`, error);
         console.warn(
           `[local-pglite] Open attempt ${attempt}/${OPEN_MAX_ATTEMPTS} failed (${getErrorMessage(error)}), retrying…`,
         );
@@ -112,6 +114,7 @@ async function createFreshPgliteInstance(localDbPath: string): Promise<PGlite> {
         return initializeMissingDatabase(localDbPath);
       }
 
+      logFullError("local-pglite createFreshPgliteInstance", error);
       throw new Error(
         `[local-pglite] Failed to open database after ${attempt} attempt(s): ${getErrorMessage(error)}`,
         { cause: error },
@@ -148,6 +151,7 @@ async function openPgliteDatabase(): Promise<PGlite> {
       await pglite.query("SELECT 1 AS ok");
       return pglite;
     } catch (error) {
+      logFullError("local-pglite health check", error);
       console.warn(
         "[local-pglite] Existing instance failed health check, reopening:",
         getErrorMessage(error),
@@ -207,6 +211,7 @@ export async function getLocalPglite(): Promise<PGlite> {
   try {
     return await initPromise;
   } catch (error) {
+    logFullError("local-pglite getLocalPglite", error);
     initPromise = null;
     pglite = null;
     initialized = false;
@@ -228,6 +233,28 @@ export async function reopenLocalDatabaseConnection(): Promise<void> {
   }
 
   await withLocalDbExclusive(reopenLocalDatabaseConnectionInternal);
+}
+
+/**
+ * Close the local PGlite handle after a write so another process (Next.js ↔
+ * Trigger.dev) can open the on-disk database and see committed rows.
+ */
+export async function releaseLocalDatabaseAfterWrite(): Promise<void> {
+  if (!isLocalDatabaseEnabled()) {
+    return;
+  }
+
+  await withLocalDbExclusive(async () => {
+    await closePgliteInstance(pglite);
+    pglite = null;
+    initPromise = null;
+
+    const { resetLocalPrismaClient } = await import("@/lib/prisma");
+    resetLocalPrismaClient();
+
+    const { resetDbReadyState } = await import("@/lib/db");
+    resetDbReadyState();
+  });
 }
 
 export { reopenLocalDatabaseConnectionInternal };

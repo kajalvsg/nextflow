@@ -1,6 +1,6 @@
 import "server-only";
 
-import { PrismaNeon, PrismaNeonHttp } from "@prisma/adapter-neon";
+import { PrismaNeon, PrismaNeonHTTP } from "@prisma/adapter-neon";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { neon, neonConfig, Pool } from "@neondatabase/serverless";
 import type { PoolConfig } from "pg";
@@ -195,8 +195,8 @@ export async function resolveRemoteDatabaseConnection(
 
   resolveConnectionPromise = (async () => {
     const candidates = buildConnectionUrlCandidates();
-    // Prefer WebSocket over HTTP — Neon HTTP cannot run Prisma transactions.
-    const priorityOrder: RemoteAdapterKind[] = ["pg", "neon-ws", "neon-http"];
+    // Prefer TCP pg — most reliable in Node/Trigger workers. Avoid neon-ws in bundled workers.
+    const priorityOrder: RemoteAdapterKind[] = ["pg", "neon-http"];
 
     const probeResults = await Promise.all(
       candidates.flatMap((connectionString) => {
@@ -273,7 +273,7 @@ export function createRemotePrismaAdapter(
     case "pg":
       return new PrismaPg(getPgPoolConfigForUrl(connection.connectionString));
     case "neon-http":
-      return new PrismaNeonHttp(connection.connectionString, {
+      return new PrismaNeonHTTP(connection.connectionString, {
         arrayMode: false,
         fullResults: true,
       });

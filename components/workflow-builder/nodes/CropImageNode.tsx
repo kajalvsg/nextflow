@@ -1,7 +1,12 @@
 "use client";
 
+import { useEffect } from "react";
 import { type NodeProps } from "reactflow";
 import type { CropImageConfig, WorkflowNodeData } from "@/types/workflow-canvas";
+import {
+  hasCropNodeOutputImage,
+  resolveCropNodeDisplayExecution,
+} from "@/lib/workflow/execution/apply-run-results";
 import { useWorkflowBuilder } from "../WorkflowBuilderContext";
 import { NodeCardShell } from "./NodeCardShell";
 import { NodeCropSliderRow } from "./NodeCropSliderRow";
@@ -21,15 +26,13 @@ export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData
   const inputImageConnected = isTargetHandleConnected(id, "input_image");
   const inputImageResolved = getConnectedInput(id, "input_image");
   const inlineExecution = getNodeInlineExecution(id);
-  const persistedOutput =
-    inlineExecution ??
-    (data.outputs
-      ? {
-          status: "success" as const,
-          output: data.outputs,
-          error: null,
-        }
-      : null);
+  const displayExecution = resolveCropNodeDisplayExecution(inlineExecution, data);
+
+  useEffect(() => {
+    console.info(
+      `[crop-node] output image present ${hasCropNodeOutputImage(inlineExecution, data)}`,
+    );
+  }, [inlineExecution, data]);
 
   const updateConfig = (patch: Partial<CropImageConfig>) => {
     updateNodeData(id, (current) => ({
@@ -102,7 +105,7 @@ export function CropImageNode({ id, data, selected }: NodeProps<WorkflowNodeData
           dense
           label="Output Image"
           nodeType="cropImage"
-          inlineExecution={persistedOutput}
+          inlineExecution={displayExecution}
           outputHandleId="output_image"
         />
       </NodeCardShell>

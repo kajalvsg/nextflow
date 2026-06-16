@@ -51,6 +51,23 @@ export function getCropOutputImage(output: unknown): {
   };
 }
 
+/** Resolve crop preview from execution output or flat node.data keys. */
+export function getCropOutputImageFromNodeData(data: {
+  outputs?: unknown;
+  outputImage?: string;
+  output_image?: string;
+  dataUrl?: string | null;
+}): ReturnType<typeof getCropOutputImage> {
+  return (
+    getCropOutputImage(data.outputs) ??
+    getCropOutputImage({
+      output_image: data.output_image,
+      outputImage: data.outputImage,
+      dataUrl: data.dataUrl,
+    })
+  );
+}
+
 export function getCropOutputUrl(output: unknown): string | null {
   return normalizeCropExecutionOutput(output)?.output_image ?? null;
 }

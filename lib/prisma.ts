@@ -52,6 +52,13 @@ export function resetLocalPrismaClient(): void {
   globalForPrisma.localPgliteInstance = undefined;
 }
 
+export function isLocalPrismaReady(): boolean {
+  return (
+    globalForPrisma.prisma !== undefined &&
+    globalForPrisma.prismaMode === "local"
+  );
+}
+
 export function initializeLocalPrisma(pglite: PGlite): PrismaClient {
   if (
     globalForPrisma.prisma &&

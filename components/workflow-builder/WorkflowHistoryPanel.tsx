@@ -27,6 +27,8 @@ type WorkflowHistoryPanelProps = {
   refreshKey: number;
   activeRunId?: string | null;
   isRunActive?: boolean;
+  liveRuns?: WorkflowRunSummary[] | null;
+  pollError?: string | null;
   onClose?: () => void;
 };
 
@@ -74,7 +76,8 @@ function matchesFilter(
   return false;
 }
 
-const HISTORY_POLL_INTERVAL_MS = 2500;
+const HISTORY_POLL_INTERVAL_MS = 2000;
+const MAX_HISTORY_POLL_FAILURES = 5;
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -89,6 +92,8 @@ export function WorkflowHistoryPanel({
   refreshKey,
   activeRunId = null,
   isRunActive = false,
+  liveRuns = null,
+  pollError = null,
   onClose,
 }: WorkflowHistoryPanelProps) {
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
@@ -104,6 +109,19 @@ export function WorkflowHistoryPanel({
   const filterRef = useRef<HTMLDivElement>(null);
   const hasLoadedRef = useRef(false);
   const expandedRunIdRef = useRef<string | null>(null);
+  const runsRef = useRef<WorkflowRunSummary[]>([]);
+  const pollFailureCountRef = useRef(0);
+
+  useEffect(() => {
+    runsRef.current = runs;
+  }, [runs]);
+
+  useEffect(() => {
+    if (liveRuns) {
+      setRuns(liveRuns);
+      setError(pollError);
+    }
+  }, [liveRuns, pollError]);
 
   useEffect(() => {
     expandedRunIdRef.current = expandedRunId;
@@ -142,14 +160,20 @@ export function WorkflowHistoryPanel({
   }, [workflowId]);
 
   useEffect(() => {
-    if (!isRunActive && !activeRunId) {
-      return;
-    }
-
     let cancelled = false;
     let refreshInFlight = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
 
     const refreshHistory = async () => {
+      const shouldPoll =
+        Boolean(activeRunId) ||
+        isRunActive ||
+        runsRef.current.some((run) => run.status === "running");
+
+      if (!shouldPoll) {
+        return;
+      }
+
       if (refreshInFlight) {
         return;
       }
@@ -166,7 +190,9 @@ export function WorkflowHistoryPanel({
         }
 
         setRuns(history);
+        runsRef.current = history;
         setError(null);
+        pollFailureCountRef.current = 0;
 
         const expandedId = expandedRunIdRef.current;
 
@@ -180,8 +206,12 @@ export function WorkflowHistoryPanel({
           }
         }
       } catch (loadError) {
+        pollFailureCountRef.current += 1;
+
         if (!cancelled) {
-          setError(getErrorMessage(loadError));
+          if (pollFailureCountRef.current >= MAX_HISTORY_POLL_FAILURES) {
+            setError(getErrorMessage(loadError));
+          }
         }
       } finally {
         refreshInFlight = false;
@@ -189,15 +219,18 @@ export function WorkflowHistoryPanel({
     };
 
     void refreshHistory();
-    const interval = setInterval(() => {
+    interval = setInterval(() => {
       void refreshHistory();
     }, HISTORY_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
+
+      if (interval) {
+        clearInterval(interval);
+      }
     };
-  }, [workflowId, activeRunId, isRunActive]);
+  }, [workflowId, activeRunId, isRunActive, refreshKey]);
 
   useEffect(() => {
     if (refreshKey === 0 || !hasLoadedRef.current) {
@@ -363,9 +396,11 @@ export function WorkflowHistoryPanel({
           <div className="workflow-history-empty-card">
             <p className="workflow-history-empty-text">Loading runs…</p>
           </div>
-        ) : error ? (
+        ) : error || pollError ? (
           <div className="workflow-history-empty-card">
-            <p className="workflow-history-empty-text text-red-500">{error}</p>
+            <p className="workflow-history-empty-text text-red-500">
+              {pollError ?? error}
+            </p>
           </div>
         ) : visibleRuns.length === 0 ? (
           <div className="workflow-history-empty-card">

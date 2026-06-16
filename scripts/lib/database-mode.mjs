@@ -23,8 +23,13 @@ export function isExplicitLocalDatabaseRequested() {
   return LOCAL_DATABASE_FLAGS.some((flag) => isEnvFlagEnabled(flag));
 }
 
-function isRemoteDatabaseForced() {
+export function isRemoteDatabaseForced() {
   return REMOTE_DATABASE_FLAGS.some((flag) => isEnvFlagEnabled(flag));
+}
+
+/** Matches app dev behavior: USE_LOCAL_DB=true uses PGlite even when DATABASE_URL is set. */
+export function prefersLocalDatabaseInDev() {
+  return isExplicitLocalDatabaseRequested() && !isRemoteDatabaseForced();
 }
 
 export function isLocalDatabaseEnabled() {
@@ -32,9 +37,9 @@ export function isLocalDatabaseEnabled() {
     return false;
   }
 
-  if (hasPostgresDatabaseUrl()) {
-    return false;
+  if (!hasPostgresDatabaseUrl()) {
+    return isExplicitLocalDatabaseRequested();
   }
 
-  return isExplicitLocalDatabaseRequested();
+  return false;
 }

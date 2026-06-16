@@ -35,6 +35,7 @@ import {
   markNodeExecutionSuccess,
   settlePlannedExecutions,
 } from "@/lib/workflow/execution/run-store";
+import { formatPrismaError, logFullError } from "@/lib/db/prisma-error";
 import { db, ensureDbReady } from "@/lib/db";
 import {
   buildRequestInputsOutputFromRawSources,
@@ -162,22 +163,60 @@ export const workflowOrchestratorTask = task({
     maxAttempts: 1,
   },
   run: async (payload: WorkflowOrchestratorPayload) => {
-    await ensureDbReady();
+    const startedAtFallback = new Date();
 
-    const run = await loadWorkflowRunWithExecutions(
-      payload.runId,
-      new Set(payload.plannedNodeIds),
-    );
+    const failSetup = async (error: unknown): Promise<never> => {
+      logFullError("workflow-orchestrator setup", error);
+
+      try {
+        await ensureDbReady();
+        await finalizeWorkflowRun(
+          payload.runId,
+          "failed",
+          startedAtFallback,
+        );
+      } catch (finalizeError) {
+        logFullError(
+          "workflow-orchestrator finalize after setup failure",
+          finalizeError,
+        );
+      }
+
+      throw formatPrismaError(error);
+    };
+
+    try {
+      await ensureDbReady();
+    } catch (error) {
+      return failSetup(error);
+    }
+
+    let run: WorkflowRunWithExecutions;
+
+    try {
+      run = await loadWorkflowRunWithExecutions(
+        payload.runId,
+        new Set(payload.plannedNodeIds),
+      );
+    } catch (error) {
+      return failSetup(error);
+    }
 
     const startedAt = run.startedAt;
 
-    const loadedGraph = await loadExecutionGraphFromWorkflow(
-      payload.workflowId,
-      payload.userId,
-    );
+    let loadedGraph;
+
+    try {
+      loadedGraph = await loadExecutionGraphFromWorkflow(
+        payload.workflowId,
+        payload.userId,
+      );
+    } catch (error) {
+      return failSetup(error);
+    }
 
     if (!loadedGraph) {
-      throw new Error("Workflow graph not found for execution.");
+      return failSetup(new Error("Workflow graph not found for execution."));
     }
 
     const { nodes, edges, rawNodes } = loadedGraph;
@@ -368,6 +407,7 @@ export const workflowOrchestratorTask = task({
 
         await completeNodeSuccess(nodeId, input, output, nodeStartedAt);
       } catch (error) {
+        logFullError(`workflow-orchestrator runLocalNode ${nodeId}`, error);
         const message =
           error instanceof Error ? error.message : "Local node failed.";
         await completeNodeFailure(
@@ -440,6 +480,7 @@ export const workflowOrchestratorTask = task({
 
         await completeNodeSuccess(nodeId, input, output, nodeStartedAt);
       } catch (error) {
+        logFullError(`workflow-orchestrator runCropNode ${nodeId}`, error);
         const message =
           error instanceof Error ? error.message : "Crop Image node failed.";
         await completeNodeFailure(nodeId, input, message, nodeStartedAt);
@@ -551,6 +592,7 @@ export const workflowOrchestratorTask = task({
 
         await completeNodeSuccess(nodeId, input, output, nodeStartedAt);
       } catch (error) {
+        logFullError(`workflow-orchestrator runGeminiNode ${nodeId}`, error);
         const message =
           error instanceof Error ? error.message : "Gemini node failed.";
         await completeNodeFailure(nodeId, input, message, nodeStartedAt);
@@ -590,6 +632,10 @@ export const workflowOrchestratorTask = task({
         try {
           assertCropImageInputUrl(input.input_image);
         } catch (error) {
+          logFullError(
+            `workflow-orchestrator prepareLevelBatchEntry ${nodeId}`,
+            error,
+          );
           const message =
             error instanceof Error ? error.message : "Crop Image input missing.";
           logOrchestrator(`missing dependency ${nodeId}: ${message}`);
@@ -909,6 +955,7 @@ export const workflowOrchestratorTask = task({
         status: finalStatus,
       };
     } catch (error) {
+      logFullError("workflow-orchestrator execution", error);
       await settlePlannedExecutions(
         run.executions,
         plannedNodeIds,
@@ -917,7 +964,7 @@ export const workflowOrchestratorTask = task({
       );
 
       await finalizeWorkflowRun(payload.runId, "failed", startedAt);
-      throw error;
+      throw formatPrismaError(error);
     }
   },
 });

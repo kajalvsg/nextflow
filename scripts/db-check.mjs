@@ -1,48 +1,51 @@
 import { config } from "dotenv";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
 import {
   hasPostgresDatabaseUrl,
   isExplicitLocalDatabaseRequested,
   isLocalDatabaseEnabled,
+  prefersLocalDatabaseInDev,
 } from "./lib/database-mode.mjs";
 import {
   getRemoteAdapterLabel,
   normalizeDatabaseUrl,
   resolveRemoteDatabaseConnection,
 } from "./lib/neon-probe.mjs";
+import {
+  closeLocalPglite,
+  ensureLocalSchema,
+  listCoreTables,
+  openLocalPglite,
+} from "./lib/pglite-local.mjs";
 
 config({ path: ".env.local" });
 config({ path: ".env" });
 
 async function checkLocalDatabase() {
-  const dbPath = join(process.cwd(), "data", "pglite");
-  const { mkdirSync } = await import("node:fs");
-  const { dirname } = await import("node:path");
-  mkdirSync(dirname(dbPath), { recursive: true });
+  const { db, dbPath } = await openLocalPglite(process.cwd());
 
-  console.log(`Checking local PGlite database at ${dbPath}`);
+  try {
+    console.log(`Checking local PGlite database at ${dbPath}`);
 
-  const db = await PGlite.create(dbPath);
-  const sql = readFileSync(join(process.cwd(), "prisma", "sql", "init.sql"), "utf8");
-  await db.exec(sql);
+    const schemaApplied = await ensureLocalSchema(db, process.cwd());
 
-  const result = await db.query("SELECT 1 AS ok");
-  console.log("✅ Local database reachable:", result.rows[0]);
+    if (schemaApplied) {
+      console.log("Applied local schema (first run).");
+    }
 
-  const tables = await db.query(`
-    SELECT tablename
-    FROM pg_tables
-    WHERE schemaname = 'public'
-      AND tablename IN ('Workflow', 'WorkflowRun', 'NodeExecution')
-    ORDER BY tablename
-  `);
+    const result = await db.query("SELECT 1 AS ok");
+    console.log("✅ Local database reachable:", result.rows[0]);
 
-  const found = tables.rows.map((row) => row.tablename);
-  console.log("Tables found:", found.length ? found.join(", ") : "(none yet)");
-  await db.close();
+    const found = await listCoreTables(db);
+    console.log("Tables found:", found.length ? found.join(", ") : "(none yet)");
+
+    if (found.length < 3) {
+      console.log("\nSchema missing or incomplete. Run:");
+      console.log("  npm run db:push");
+    }
+  } finally {
+    await closeLocalPglite(db);
+  }
 }
 
 async function listRemoteTablesPg(connectionString) {
@@ -91,7 +94,7 @@ async function checkRemoteDatabase(connectionString) {
   const host = new URL(connectionString).hostname;
 
   console.log(`Checking Neon/Postgres host: ${host}`);
-  console.log("Connecting (TCP → Neon HTTP → WebSocket)...");
+  console.log("Connecting (TCP → Neon HTTP)…");
 
   const resolved = await resolveRemoteDatabaseConnection();
 
@@ -115,7 +118,13 @@ async function checkRemoteDatabase(connectionString) {
 }
 
 try {
-  if (isLocalDatabaseEnabled()) {
+  if (isLocalDatabaseEnabled() || prefersLocalDatabaseInDev()) {
+    if (prefersLocalDatabaseInDev() && hasPostgresDatabaseUrl()) {
+      console.log(
+        "USE_LOCAL_DB=true — checking local PGlite (Neon skipped in dev).",
+      );
+    }
+
     await checkLocalDatabase();
     process.exit(0);
   }
@@ -142,7 +151,7 @@ try {
     }
 
     console.warn(
-      "\n⚠ Neon unreachable — checking local PGlite fallback (USE_LOCAL_DB=true)...",
+      "\n⚠ Neon unreachable — checking local PGlite fallback (USE_LOCAL_DB=true)…",
     );
     await checkLocalDatabase();
     process.exit(0);
@@ -152,9 +161,10 @@ try {
   console.error("❌ Database check failed:", message);
 
   console.error("\nQuick fix for local development (no Neon required):");
-  console.error("  1. Add USE_LOCAL_DB=true to .env.local");
-  console.error("  2. Run: npm run db:check");
-  console.error("  3. Restart: npm run dev");
+  console.error("  1. Stop npm run dev and npm run trigger:dev");
+  console.error("  2. Run: npm run db:push");
+  console.error("  3. Run: npm run db:check");
+  console.error("  4. Restart: npm run dev");
   console.error("\nOr fix Neon:");
   console.error("  1. Open https://console.neon.tech and wake your project");
   console.error("  2. Copy a fresh *pooled* connection string (no channel_binding=require)");

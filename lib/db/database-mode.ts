@@ -136,6 +136,18 @@ export async function resolveDatabaseBackend(): Promise<"local" | "postgres"> {
       return "postgres";
     }
 
+    if (isExplicitLocalDatabaseRequested() && !isRemoteDatabaseForced()) {
+      setResolvedUseLocal(true);
+
+      if (process.env.NODE_ENV === "development") {
+        console.info(
+          "[db] USE_LOCAL_DB=true — using local PGlite for app and Trigger.dev.",
+        );
+      }
+
+      return "local";
+    }
+
     const resolved = await resolveRemoteDatabaseConnection();
 
     if (resolved) {

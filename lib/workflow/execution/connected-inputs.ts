@@ -109,6 +109,22 @@ function buildExecutionStateMap(
         status: "success",
         output: node.data.outputs,
       });
+      continue;
+    }
+
+    if (
+      node.data.nodeType === "cropImage" &&
+      (node.data.output_image || node.data.outputImage || node.data.dataUrl)
+    ) {
+      states.set(node.id, {
+        status: "success",
+        output: {
+          output_image: node.data.output_image ?? node.data.outputImage ?? node.data.dataUrl,
+          outputImage: node.data.outputImage ?? node.data.output_image ?? node.data.dataUrl,
+          dataUrl: node.data.dataUrl ?? null,
+          outputs: node.data.outputs,
+        },
+      });
     }
   }
 

@@ -1,11 +1,26 @@
 import type { NodeExecution } from "@prisma/client";
 import { db, ensureDbReady } from "@/lib/db";
+import { releaseLocalDatabaseAfterWrite } from "@/lib/db/local-pglite";
+import { isLocalDatabaseEnabled } from "@/lib/db/database-mode";
+import { logFullError } from "@/lib/db/prisma-error";
 import { defaultLabelForNodeType } from "@/lib/workflow/node-defaults";
 import type { RunScope, RunStatus } from "@/types/workflow-execution";
 import type { WorkflowNodeType } from "@/types/workflow-canvas";
 
 function logRunStore(message: string): void {
   console.info(`[run-store] ${message}`);
+}
+
+async function publishLocalRunState(): Promise<void> {
+  if (!isLocalDatabaseEnabled()) {
+    return;
+  }
+
+  try {
+    await releaseLocalDatabaseAfterWrite();
+  } catch (error) {
+    logFullError("run-store publishLocalRunState", error);
+  }
 }
 
 /**
@@ -44,6 +59,7 @@ export async function createWorkflowRunRecord(input: {
       executions.push(execution);
     }
   } catch (error) {
+    logFullError("run-store createWorkflowRunRecord", error);
     await db.workflowRun.update({
       where: { id: run.id },
       data: {
@@ -58,6 +74,8 @@ export async function createWorkflowRunRecord(input: {
   logRunStore(
     `created workflow run ${run.id} (${input.scope}, ${input.plannedNodes.length} nodes) -> running`,
   );
+
+  await publishLocalRunState();
 
   return { ...run, executions };
 }
@@ -105,6 +123,8 @@ export async function markNodeExecutionSuccess(
     `node execution ${updated.nodeId} (${executionId}) -> success (${updated.durationMs ?? 0}ms)`,
   );
 
+  await publishLocalRunState();
+
   return updated;
 }
 
@@ -134,6 +154,8 @@ export async function markNodeExecutionFailed(
   logRunStore(
     `node execution ${updated.nodeId} (${executionId}) -> failed: ${error}`,
   );
+
+  await publishLocalRunState();
 
   return updated;
 }
@@ -186,6 +208,8 @@ export async function markNodeExecutionSkipped(executionId: string) {
     `node execution ${updated.nodeId} (${executionId}) -> skipped`,
   );
 
+  await publishLocalRunState();
+
   return updated;
 }
 
@@ -211,6 +235,8 @@ export async function finalizeWorkflowRun(
   logRunStore(
     `workflow run ${runId} running -> ${status} (${durationMs}ms)`,
   );
+
+  await publishLocalRunState();
 
   return updated;
 }

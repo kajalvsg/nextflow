@@ -1,4 +1,5 @@
 import { isLocalDatabaseEnabled } from "@/lib/db/database-mode";
+import { logFullError } from "@/lib/db/prisma-error";
 
 const RETRYABLE_CODES = new Set([
   "ECONNRESET",
@@ -71,6 +72,7 @@ export async function withDbRetry<T>(
       lastError = error;
 
       if (!isRetryableDbError(error) || attempt === attempts) {
+        logFullError(`db retry attempt ${attempt}/${attempts}`, error);
         throw error;
       }
 

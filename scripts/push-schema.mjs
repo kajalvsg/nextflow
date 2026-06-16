@@ -3,53 +3,46 @@
  * Use when `prisma db push` fails with P1001 on networks without working IPv6.
  */
 import { config } from "dotenv";
-import { readFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
-import { hasPostgresDatabaseUrl, isLocalDatabaseEnabled } from "./lib/database-mode.mjs";
+import {
+  hasPostgresDatabaseUrl,
+  isExplicitLocalDatabaseRequested,
+  isLocalDatabaseEnabled,
+  prefersLocalDatabaseInDev,
+} from "./lib/database-mode.mjs";
 import {
   normalizeDatabaseUrl,
   resolveRemoteDatabaseConnection,
 } from "./lib/neon-probe.mjs";
+import {
+  closeLocalPglite,
+  getInitSqlPath,
+  openLocalPglite,
+} from "./lib/pglite-local.mjs";
+import { readFileSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, "..");
-const initSqlPath = join(rootDir, "prisma", "sql", "init.sql");
 
 config({ path: join(rootDir, ".env.local") });
 config({ path: join(rootDir, ".env") });
 
-const sql = readFileSync(initSqlPath, "utf8");
-
-function normalizeDatabaseUrl(rawUrl) {
-  const url = new URL(rawUrl);
-  url.searchParams.delete("channel_binding");
-
-  if (!url.searchParams.has("sslmode")) {
-    url.searchParams.set("sslmode", "require");
-  }
-
-  if (!url.searchParams.has("uselibpqcompat")) {
-    url.searchParams.set("uselibpqcompat", "true");
-  }
-
-  return url.toString();
-}
+const sql = readFileSync(getInitSqlPath(rootDir), "utf8");
 
 async function pushToLocalDatabase() {
-  const dbPath = join(rootDir, "data", "pglite");
-  mkdirSync(dirname(dbPath), { recursive: true });
+  const { db, dbPath } = await openLocalPglite(rootDir);
 
-  console.log(`Applying schema to local PGlite at ${dbPath}...`);
-  const db = await PGlite.create(dbPath);
-  await db.exec(sql);
-  await db.close();
-
-  console.log("✅ Schema applied successfully!");
-  console.log("   Tables: Workflow, WorkflowRun, NodeExecution");
-  console.log("\nNext: run `npm run db:generate` if you haven't already.");
+  try {
+    console.log(`Applying schema to local PGlite at ${dbPath}...`);
+    await db.exec(sql);
+    console.log("✅ Schema applied successfully!");
+    console.log("   Tables: Workflow, WorkflowRun, NodeExecution");
+    console.log("\nNext: run `npm run db:generate` if you haven't already.");
+  } finally {
+    await closeLocalPglite(db);
+  }
 }
 
 async function pushToRemoteDatabase(connectionString) {
@@ -87,7 +80,7 @@ async function pushToRemoteDatabase(connectionString) {
 }
 
 try {
-  if (isLocalDatabaseEnabled()) {
+  if (isLocalDatabaseEnabled() || prefersLocalDatabaseInDev()) {
     await pushToLocalDatabase();
     process.exit(0);
   }
@@ -105,21 +98,26 @@ try {
     process.exit(1);
   }
 
-  await pushToRemoteDatabase(connectionString);
+  try {
+    await pushToRemoteDatabase(connectionString);
+  } catch (remoteError) {
+    if (!isExplicitLocalDatabaseRequested()) {
+      throw remoteError;
+    }
+
+    console.warn(
+      "\n⚠ Neon unreachable — applying schema to local PGlite fallback…",
+    );
+    await pushToLocalDatabase();
+  }
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error("❌ Failed to push schema:", message || "(connection timeout)");
 
-  if (!isLocalDatabaseEnabled()) {
-    console.error("\nQuick fix for local development (no Neon required):");
-    console.error("  1. Add USE_LOCAL_DB=true to .env.local");
-    console.error("  2. Run: npm run db:push");
-    console.error("  3. Restart: npm run dev");
-    console.error("\nOr fix Neon:");
-    console.error("  1. Wake your DB at https://console.neon.tech (run SELECT 1)");
-    console.error("  2. Copy a fresh DATABASE_URL from Neon dashboard");
-    console.error("  3. Check firewall/VPN isn't blocking port 5432");
-  }
+  console.error("\nQuick fix for local development (no Neon required):");
+  console.error("  1. Stop npm run dev and npm run trigger:dev");
+  console.error("  2. Run: npm run db:push");
+  console.error("  3. Restart: npm run dev");
 
   process.exit(1);
 }
