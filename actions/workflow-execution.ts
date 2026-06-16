@@ -167,25 +167,52 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export function hasSuccessfulRunOutputs(
+  executions: Record<string, NodeInlineExecutionState>,
+): boolean {
+  return Object.values(executions).some(
+    (execution) =>
+      execution.status === "success" && execution.output != null,
+  );
+}
+
 export async function getWorkflowRunInlineExecutionsWithRetry(
   runId: string,
-  maxAttempts = 5,
+  maxAttempts = 8,
 ): Promise<Record<string, NodeInlineExecutionState>> {
   let last: Record<string, NodeInlineExecutionState> = {};
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     last = await getWorkflowRunInlineExecutions(runId);
 
-    const hasSuccessfulOutput = Object.values(last).some(
-      (execution) =>
-        execution.status === "success" && execution.output != null,
-    );
-
-    if (hasSuccessfulOutput || attempt === maxAttempts) {
+    if (hasSuccessfulRunOutputs(last) || attempt === maxAttempts) {
       return last;
     }
 
-    await wait(300 * attempt);
+    await wait(500 * attempt);
+  }
+
+  return last;
+}
+
+/** Poll a specific run until outputs appear (Neon / Trigger read-after-write). */
+export async function waitForWorkflowRunOutputs(
+  runId: string,
+  maxWaitMs = 25_000,
+): Promise<Record<string, NodeInlineExecutionState>> {
+  const startedAt = Date.now();
+  let attempt = 0;
+  let last: Record<string, NodeInlineExecutionState> = {};
+
+  while (Date.now() - startedAt < maxWaitMs) {
+    attempt += 1;
+    last = await getWorkflowRunInlineExecutions(runId);
+
+    if (hasSuccessfulRunOutputs(last)) {
+      return last;
+    }
+
+    await wait(Math.min(500 * attempt, 2_000));
   }
 
   return last;

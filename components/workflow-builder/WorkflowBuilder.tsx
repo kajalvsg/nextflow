@@ -23,10 +23,9 @@ import {
   getActiveRunState,
   getLatestWorkflowInlineExecutions,
   getWorkflowRunHistory,
-  getWorkflowRunInlineExecutions,
-  getWorkflowRunInlineExecutionsWithRetry,
-  mapRunDetailToInlineExecutions,
+  hasSuccessfulRunOutputs,
   startWorkflowRun,
+  waitForWorkflowRunOutputs,
 } from "@/actions/workflow-execution";
 import { saveWorkflowGraph } from "@/actions/workflow-builder";
 import { autoArrangeWorkflowNodes } from "@/lib/workflow/auto-arrange";
@@ -1978,7 +1977,6 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
       if (!cancelled) {
         setLiveRunHistory(history);
-        setHistoryRefreshKey((current) => current + 1);
       }
 
       return history;
@@ -1991,30 +1989,45 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       setActiveNodeIds(state.activeNodeIds);
       applyRunExecutionSnapshots(state.nodeExecutions);
 
+      let outputsApplied = hasSuccessfulRunOutputs(
+        mapSnapshotsToInlineExecutions(state.nodeExecutions),
+      );
+
       try {
         const executions = await pollServerAction(
-          "getWorkflowRunInlineExecutionsWithRetry",
-          () => getWorkflowRunInlineExecutionsWithRetry(runId),
+          "waitForWorkflowRunOutputs",
+          () => waitForWorkflowRunOutputs(runId),
+          35_000,
         );
 
         if (!cancelled) {
           applyRunResultsToCanvas(executions, "run-complete");
+          outputsApplied =
+            outputsApplied || hasSuccessfulRunOutputs(executions);
         }
       } catch (error) {
-        console.error(
-          "[poll] getWorkflowRunInlineExecutions failed:",
-          error,
-        );
+        console.error("[poll] waitForWorkflowRunOutputs failed:", error);
+      }
 
-        if (!cancelled) {
-          setRunPollError("Run finished but failed to load node outputs.");
-          clearUpdatingStates();
+      if (!cancelled) {
+        clearUpdatingStates();
+
+        if (!outputsApplied) {
+          setRunPollError(
+            "Run finished but outputs are still syncing. Check history in a moment.",
+          );
+        } else {
+          setRunPollError(null);
         }
       }
 
       await refreshHistory().catch((error) => {
         console.error("[poll] refreshHistory failed:", error);
       });
+
+      if (!cancelled) {
+        setHistoryRefreshKey((current) => current + 1);
+      }
 
       if (cancelled) {
         return;
@@ -2149,7 +2162,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     return () => {
       cancelled = true;
     };
-  }, [workflowId, historyRefreshKey, applyRunResultsToCanvas]);
+  }, [workflowId, applyRunResultsToCanvas]);
 
   const runningNodeIdSet = useMemo(
     () => new Set(activeNodeIds),
