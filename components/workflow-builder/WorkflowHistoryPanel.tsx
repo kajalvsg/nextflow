@@ -8,6 +8,7 @@ import {
 } from "@/actions/workflow-execution";
 import type {
   NodeInlineExecutionState,
+  RunStatus,
   WorkflowRunDetail,
   WorkflowRunSummary,
 } from "@/types/workflow-execution";
@@ -35,6 +36,7 @@ type WorkflowHistoryPanelProps = {
     executions: Record<string, NodeInlineExecutionState>,
     source: "history",
   ) => void;
+  onActiveRunSettled?: (runId: string, status: RunStatus) => void;
   onClose?: () => void;
 };
 
@@ -101,6 +103,7 @@ export function WorkflowHistoryPanel({
   liveRuns = null,
   pollError = null,
   onApplyRunResults,
+  onActiveRunSettled,
   onClose,
 }: WorkflowHistoryPanelProps) {
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
@@ -119,10 +122,34 @@ export function WorkflowHistoryPanel({
   const runsRef = useRef<WorkflowRunSummary[]>([]);
   const pollFailureCountRef = useRef(0);
   const onApplyRunResultsRef = useRef(onApplyRunResults);
+  const onActiveRunSettledRef = useRef(onActiveRunSettled);
 
   useEffect(() => {
     onApplyRunResultsRef.current = onApplyRunResults;
   }, [onApplyRunResults]);
+
+  useEffect(() => {
+    onActiveRunSettledRef.current = onActiveRunSettled;
+  }, [onActiveRunSettled]);
+
+  const notifyActiveRunSettled = (history: WorkflowRunSummary[]) => {
+    if (!activeRunId) {
+      return;
+    }
+
+    const activeRun = history.find((run) => run.id === activeRunId);
+
+    if (
+      !activeRun ||
+      (activeRun.status !== "success" &&
+        activeRun.status !== "failed" &&
+        activeRun.status !== "partial")
+    ) {
+      return;
+    }
+
+    onActiveRunSettledRef.current?.(activeRun.id, activeRun.status);
+  };
 
   const applySuccessfulRunOutputs = (detail: WorkflowRunDetail | null) => {
     if (!detail || detail.status !== "success") {
@@ -148,8 +175,9 @@ export function WorkflowHistoryPanel({
     if (liveRuns) {
       setRuns(liveRuns);
       setError(pollError);
+      notifyActiveRunSettled(liveRuns);
     }
-  }, [liveRuns, pollError]);
+  }, [liveRuns, pollError, activeRunId]);
 
   useEffect(() => {
     expandedRunIdRef.current = expandedRunId;
@@ -221,6 +249,8 @@ export function WorkflowHistoryPanel({
         runsRef.current = history;
         setError(null);
         pollFailureCountRef.current = 0;
+
+        notifyActiveRunSettled(history);
 
         const latestRun = history[0];
 

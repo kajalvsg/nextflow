@@ -20,9 +20,9 @@ import {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import {
-  getActiveRunState,
   getLatestWorkflowInlineExecutions,
   getWorkflowRunHistory,
+  pollActiveWorkflowRun,
   startWorkflowRun,
   waitForWorkflowRunOutputs,
 } from "@/actions/workflow-execution";
@@ -127,9 +127,11 @@ type SaveStatus = "idle" | "saving" | "saved" | "error";
 const TOAST_DURATION_MS = 3200;
 const SAVE_INDICATOR_HIDE_MS = 2000;
 const AUTOSAVE_DEBOUNCE_MS = 1200;
-const RUN_POLL_INTERVAL_MS = 2000;
+const RUN_POLL_INTERVAL_MS = 1500;
 const RUN_STATUS_RESET_MS = 3500;
-const MAX_RUN_POLL_FAILURES = 5;
+const MAX_RUN_POLL_FAILURES = 8;
+const MAX_RUN_WAIT_MS = 180_000;
+const RUN_POLL_SERVER_TIMEOUT_MS = 20_000;
 
 function isTerminalRunStatus(status: RunStatus): boolean {
   return status === "success" || status === "failed" || status === "partial";
@@ -310,6 +312,9 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
   const [moveConnectedGroup, setMoveConnectedGroup] = useState(false);
   const [isWorkflowCanvasDragging, setIsWorkflowCanvasDragging] = useState(false);
   const moveConnectedGroupRef = useRef(false);
+  const finishActiveRunRef = useRef<
+    ((state: ActiveRunState) => Promise<void>) | null
+  >(null);
   const [canRunWorkflow, setCanRunWorkflow] = useState(true);
   const [isLeaving, setIsLeaving] = useState(false);
 
@@ -1820,6 +1825,32 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     [applyRunResultsToCanvas],
   );
 
+  const handleActiveRunSettledFromHistory = useCallback(
+    async (runId: string, status: RunStatus) => {
+      if (activeRunId !== runId || !finishActiveRunRef.current) {
+        return;
+      }
+
+      try {
+        const state = await pollServerAction(
+          "pollActiveWorkflowRun",
+          () => pollActiveWorkflowRun(runId),
+          RUN_POLL_SERVER_TIMEOUT_MS,
+        );
+
+        if (state) {
+          await finishActiveRunRef.current({
+            ...state,
+            status: isTerminalRunStatus(status) ? status : state.status,
+          });
+        }
+      } catch (error) {
+        console.error("[history] active run settle failed:", error);
+      }
+    },
+    [activeRunId],
+  );
+
   const resetRunVisualState = useCallback(() => {
     setNodeStatuses({});
     setActiveNodeIds([]);
@@ -1948,6 +1979,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
     let pollFailureCount = 0;
     let pollInFlight = false;
     const runId = activeRunId;
+    const runStartedAt = Date.now();
 
     const stopPolling = () => {
       if (interval) {
@@ -1996,8 +2028,8 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       try {
         const executions = await pollServerAction(
           "waitForWorkflowRunOutputs",
-          () => waitForWorkflowRunOutputs(runId),
-          35_000,
+          () => waitForWorkflowRunOutputs(runId, 45_000),
+          50_000,
         );
 
         if (!cancelled) {
@@ -2051,8 +2083,14 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
       }, RUN_STATUS_RESET_MS);
     };
 
+    finishActiveRunRef.current = finishActiveRun;
+
     const resolveActiveRunState = async (): Promise<ActiveRunState | null> =>
-      pollServerAction("getActiveRunState", () => getActiveRunState(runId));
+      pollServerAction(
+        "pollActiveWorkflowRun",
+        () => pollActiveWorkflowRun(runId),
+        RUN_POLL_SERVER_TIMEOUT_MS,
+      );
 
     const poll = async () => {
       if (cancelled || pollInFlight) {
@@ -2072,6 +2110,23 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
         }
 
         if (!state) {
+          const historySummary = history?.find((run) => run.id === runId);
+
+          if (
+            historySummary &&
+            isTerminalRunStatus(historySummary.status)
+          ) {
+            pollFailureCount = 0;
+            await finishActiveRun({
+              runId,
+              status: historySummary.status,
+              nodeStatuses: {},
+              activeNodeIds: [],
+              nodeExecutions: [],
+            });
+            return;
+          }
+
           pollFailureCount += 1;
 
           if (pollFailureCount >= MAX_RUN_POLL_FAILURES) {
@@ -2100,6 +2155,19 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
             : state.status;
 
         if (status === "running") {
+          if (Date.now() - runStartedAt > MAX_RUN_WAIT_MS) {
+            stopPolling();
+            clearUpdatingStates();
+            setIsWorkflowRunning(false);
+            setRunPollError(
+              "Run timed out. Deploy Trigger workers with npm run trigger:deploy and verify env vars on Vercel.",
+            );
+            showToast("Workflow run timed out.");
+            resetRunVisualState();
+            setLiveRunHistory(null);
+            return;
+          }
+
           applyRunExecutionSnapshots(state.nodeExecutions);
           return;
         }
@@ -2135,6 +2203,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
     return () => {
       cancelled = true;
+      finishActiveRunRef.current = null;
       stopPolling();
 
       if (resetTimer) {
@@ -2363,6 +2432,7 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
               liveRuns={liveRunHistory}
               pollError={runPollError}
               onApplyRunResults={applyRunResultsToCanvas}
+              onActiveRunSettled={handleActiveRunSettledFromHistory}
               onClose={() => setHistoryOpen(false)}
             />
           ) : null}

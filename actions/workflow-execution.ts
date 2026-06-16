@@ -127,7 +127,7 @@ export async function getWorkflowRunInlineExecutionsWithRetry(
 /** Poll a specific run until outputs appear (Neon / Trigger read-after-write). */
 export async function waitForWorkflowRunOutputs(
   runId: string,
-  maxWaitMs = 25_000,
+  maxWaitMs = 45_000,
 ): Promise<Record<string, NodeInlineExecutionState>> {
   const startedAt = Date.now();
   let attempt = 0;
@@ -145,6 +145,90 @@ export async function waitForWorkflowRunOutputs(
   }
 
   return last;
+}
+
+function buildActiveRunStateFromDetail(
+  detail: WorkflowRunDetail,
+): ActiveRunState {
+  const nodeStatuses: Record<string, NodeRuntimeStatus> = {};
+  const activeNodeIds: string[] = [];
+
+  for (const execution of detail.executions) {
+    if (execution.status === "running") {
+      nodeStatuses[execution.nodeId] = "running";
+      activeNodeIds.push(execution.nodeId);
+    } else if (execution.status === "success") {
+      nodeStatuses[execution.nodeId] = "success";
+    } else if (execution.status === "failed") {
+      nodeStatuses[execution.nodeId] = "failed";
+    } else {
+      nodeStatuses[execution.nodeId] = "idle";
+    }
+  }
+
+  return {
+    runId: detail.id,
+    status: detail.status,
+    nodeStatuses,
+    activeNodeIds,
+    nodeExecutions: mapExecutionsToSnapshots(detail.executions),
+  };
+}
+
+async function fetchWorkflowRunStatus(
+  runId: string,
+): Promise<WorkflowRunSummary["status"] | null> {
+  const userId = await requireUserId();
+
+  const row = await withFreshLocalRead(async (client) =>
+    client.workflowRun.findFirst({
+      where: { id: runId, userId },
+      select: { status: true },
+    }),
+  );
+
+  return row
+    ? (row.status as WorkflowRunSummary["status"])
+    : null;
+}
+
+/**
+ * Retry run status reads inside one server-action round trip (Neon / Trigger lag).
+ */
+export async function pollActiveWorkflowRun(
+  runId: string,
+  maxWaitMs = 12_000,
+): Promise<ActiveRunState | null> {
+  const startedAt = Date.now();
+  let attempt = 0;
+  let lastStatus: WorkflowRunSummary["status"] | null = null;
+
+  while (Date.now() - startedAt < maxWaitMs) {
+    attempt += 1;
+    lastStatus = await fetchWorkflowRunStatus(runId);
+
+    if (!lastStatus) {
+      return null;
+    }
+
+    if (lastStatus !== "running") {
+      break;
+    }
+
+    if (attempt >= 8) {
+      break;
+    }
+
+    await wait(Math.min(400 * attempt, 1_500));
+  }
+
+  const detail = await getWorkflowRunDetail(runId);
+
+  if (!detail) {
+    return null;
+  }
+
+  return buildActiveRunStateFromDetail(detail);
 }
 
 export async function getLatestWorkflowInlineExecutions(
@@ -524,27 +608,5 @@ export async function getActiveRunState(
     return null;
   }
 
-  const nodeStatuses: Record<string, NodeRuntimeStatus> = {};
-  const activeNodeIds: string[] = [];
-
-  for (const execution of detail.executions) {
-    if (execution.status === "running") {
-      nodeStatuses[execution.nodeId] = "running";
-      activeNodeIds.push(execution.nodeId);
-    } else if (execution.status === "success") {
-      nodeStatuses[execution.nodeId] = "success";
-    } else if (execution.status === "failed") {
-      nodeStatuses[execution.nodeId] = "failed";
-    } else {
-      nodeStatuses[execution.nodeId] = "idle";
-    }
-  }
-
-  return {
-    runId: detail.id,
-    status: detail.status,
-    nodeStatuses,
-    activeNodeIds,
-    nodeExecutions: mapExecutionsToSnapshots(detail.executions),
-  };
+  return buildActiveRunStateFromDetail(detail);
 }
