@@ -15,7 +15,7 @@
     "db:check": "node scripts/db-check.mjs",
     "db:studio": "prisma studio",
     "trigger:dev": "node scripts/trigger-dev.mjs",
-    "trigger:deploy": "npx trigger.dev@4.4.6 deploy"
+    "trigger:deploy": "prisma generate && npx trigger.dev@4.4.6 deploy"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.4.1",
@@ -46,6 +46,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@trigger.dev/build": "4.4.6",
     "@types/node": "^20",
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
