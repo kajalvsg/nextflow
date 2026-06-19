@@ -21,6 +21,7 @@ import {
 import "reactflow/dist/style.css";
 import {
   getLatestWorkflowInlineExecutions,
+  getActiveRunState,
   getWorkflowRunHistory,
   pollActiveWorkflowRun,
   startWorkflowRun,
@@ -1766,8 +1767,28 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
   );
 
   const getNodeExecutionStatus = useCallback(
-    (nodeId: string): NodeRuntimeStatus => nodeStatuses[nodeId] ?? "idle",
-    [nodeStatuses],
+    (nodeId: string): NodeRuntimeStatus => {
+      const mapped = nodeStatuses[nodeId];
+      if (
+        mapped === "running" ||
+        mapped === "success" ||
+        mapped === "failed"
+      ) {
+        return mapped;
+      }
+
+      if (activeNodeIds.includes(nodeId)) {
+        return "running";
+      }
+
+      const inline = nodeInlineExecutions[nodeId];
+      if (inline?.status === "running") {
+        return "running";
+      }
+
+      return "idle";
+    },
+    [nodeStatuses, activeNodeIds, nodeInlineExecutions],
   );
 
   const getNodeInlineExecution = useCallback(
@@ -2127,8 +2148,8 @@ function WorkflowCanvasInner({ workflow }: WorkflowCanvasInnerProps) {
 
     const resolveActiveRunState = async (): Promise<ActiveRunState | null> =>
       pollServerAction(
-        "pollActiveWorkflowRun",
-        () => pollActiveWorkflowRun(runId),
+        "getActiveRunState",
+        () => getActiveRunState(runId),
         RUN_POLL_SERVER_TIMEOUT_MS,
       );
 

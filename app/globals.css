@@ -2225,24 +2225,47 @@ html.dark .cl-userButtonPopoverFooter svg {
   color: var(--muted-foreground);
 }
 
-@keyframes workflow-node-pulse {
+@keyframes workflow-node-glow-pulse {
   0%,
   100% {
-    box-shadow:
-      0 0 16px rgba(251, 191, 36, 0.25),
-      0 0 32px rgba(251, 191, 36, 0.12);
+    opacity: 0.45;
+    transform: scale(1);
   }
 
   50% {
-    box-shadow:
-      0 0 28px rgba(251, 191, 36, 0.55),
-      0 0 48px rgba(251, 191, 36, 0.25);
+    opacity: 0.95;
+    transform: scale(1.04);
   }
 }
 
-.workflow-node-running {
-  border-color: rgba(251, 191, 36, 0.75) !important;
-  animation: workflow-node-pulse 1.6s ease-in-out infinite;
+.workflow-node-card.workflow-node-running {
+  border-color: rgba(99, 102, 241, 0.8) !important;
+  position: relative;
+  isolation: isolate;
+}
+
+.workflow-node-card.workflow-node-running::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  z-index: -1;
+  border-radius: 14px;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(129, 140, 248, 0.55) 0%,
+    rgba(59, 130, 246, 0.35) 42%,
+    rgba(99, 102, 241, 0.12) 68%,
+    transparent 78%
+  );
+  filter: blur(2px);
+  animation: workflow-node-glow-pulse 1.6s ease-in-out infinite;
+}
+
+.workflow-node-card.workflow-node-running.workflow-node-card-active {
+  box-shadow:
+    0 0 0 1px rgb(99 102 241 / 0.2),
+    0 8px 24px rgb(59 130 246 / 0.18);
 }
 
 .workflow-node-success {
