@@ -123,10 +123,11 @@ export function NodeCardShell({
     <div
       className={cn(
         "workflow-node-card relative overflow-visible rounded-[10px] border bg-surface shadow-card transition-[border-color,box-shadow] duration-150",
-        selected || executionStatus !== "idle"
+        selected ||
+          (executionStatus !== "idle" && executionStatus !== "running")
           ? "workflow-node-card-active"
           : "border-border-soft",
-        executionStatus === "running" && "workflow-node-running",
+        executionStatus === "running" && "running-node-glow",
         executionStatus === "success" && "workflow-node-success",
         executionStatus === "failed" && "workflow-node-failed",
         locked && "workflow-node-card-locked",
