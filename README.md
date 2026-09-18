@@ -68,7 +68,7 @@ Add the IP shown in the terminal to `ALLOWED_DEV_ORIGINS` in `.env.local` (comma
 ### 1. Clone and install
 
 ```bash
-git clone <your-repo-url>
+git clone <repo-url>
 cd nextflow
 npm install
 ```
@@ -178,4 +178,4 @@ Use the builder toolbar to:
 
 ## License
 
-Private — all rights reserved unless otherwise specified.
+Private - all rights reserved.
